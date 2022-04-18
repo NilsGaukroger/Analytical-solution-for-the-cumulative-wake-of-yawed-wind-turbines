@@ -94,6 +94,13 @@ class flowcase():
         self.V    = self.flowdata.V
         self.V_zh = self.flowdata.V.interp(z=self.wf.zh)
     
+    def velocityProfile(self, velComp, pos):
+        profiles = {
+            'U' : self.wf.Uinf - self.U_zh.interp(x = self.wf.x_AD[0] + pos*self.wf.D),
+            'V' : self.V_zh.interp(x = self.wf.x_AD[0] + pos*self.wf.D)
+            }
+        return profiles.get(velComp)
+    
     def plot_contourWithProfiles(self, poss, xlim=None, ylim=(-3,3), levels=100, FigureSize=None):
         # Plot plane of V at hub height for single case with profiles at several downstream positions
         
@@ -196,7 +203,7 @@ class flowcase():
             _, V_c = wakeCentre(wcm, V_pr.y, V_pr)
             
             # Calculate std
-            sigma = wakewidth(wwm, V_pr.y, V_pr)
+            sigma = wakeWidth(wwm, V_pr.y, V_pr)
             
             # Plot profile with label
             lab = '$x/D = {:d}$'.format(pos)
@@ -248,8 +255,8 @@ class flowcase():
             wc_V[i], _ = wakeCentre(wcm, V_pr.y, V_pr)
             
             # Find wake width and append to lists
-            ww_U[i] = wakewidth(wwm, U_pr.y, U_pr)
-            ww_V[i] = wakewidth(wwm, V_pr.y, V_pr)
+            ww_U[i] = wakeWidth(wwm, U_pr.y, U_pr)
+            ww_V[i] = wakeWidth(wwm, V_pr.y, V_pr)
             
         # Create subplots object
         fig, ax = plt.subplots(1, 1, figsize=FigureSize)
@@ -295,13 +302,6 @@ class flowcase():
             os.makedirs(figpath)
         fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
         fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
-        
-    def velocityProfile(self, velComp, pos):
-        profiles = {
-            'U' : self.wf.Uinf - self.U_zh.interp(x = self.wf.x_AD[0] + pos*self.wf.D),
-            'V' : self.V_zh.interp(x = self.wf.x_AD[0] + pos*self.wf.D)
-            }
-        return profiles.get(velComp)
         
 class flowcaseGroup():
     def __init__(self, var, vals, path, wf, flowcases=None):
@@ -395,7 +395,7 @@ class flowcaseGroup():
                 _, V_c = wakeCentre(wcm, V_pr.y, V_pr)
                 
                 # Calculate wake width
-                sigma = wakewidth(wwm, V_pr.y, V_pr)
+                sigma = wakeWidth(wwm, V_pr.y, V_pr)
                 
                 # Plot profile with label
                 lab = '$x/D = {:d}$'.format(pos)
@@ -520,7 +520,7 @@ def wakeCentre(method, y, vel):
         vel_c, y_c, _, _ = fit_Gaussian(y, vel)
     return y_c, vel_c
 
-def wakewidth(method, y, vel):
+def wakeWidth(method, y, vel):
     # Define switcher dictionary
     methods = {
         'Gaussian'  : [fit_Gaussian],
