@@ -21,7 +21,8 @@ plt.close('all')
 
 os.chdir('C:/Users/nilsg/OneDrive/Documents/EWEM/Thesis/NUMERICAL/PyWakeEllipSys/')
 
-from post_utils import windTurbine, windFarm, flowcase, flowcaseGroup
+from post_utils import windTurbine, windFarm, flowcaseGroup
+# from post_utils import flowcase
 # import post_utils as pu
 
 FigureSize = tuple(x/3 for x in [25.87,11.69])
