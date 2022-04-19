@@ -319,6 +319,7 @@ class flowcaseGroup():
         self.flowcases = []
         for i, val in enumerate(vals):
             wf = copy.copy(wf_template)
+            wf.wts = copy.copy(wf_template.wts)
             infile = path + var + '/' + str(val) + '/flowdata.nc'
             self.flowcases.append(flowcase(infile, wf))
             if self.var == 'yaw':
