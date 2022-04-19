@@ -39,14 +39,14 @@ ct_vals  = [0.2, 0.4, 0.6, 0.8]
 ti_vals  = [0.04, 0.06, 0.08, 0.1]
 
 #%% Velocity profile: Effect of yaw angle
-# pyaws = flowcaseGroup(var='yaw', vals=[x for x in yaw_vals if x>=0], path=data_path, wf=lss_wf)
+pyaws = flowcaseGroup(var='yaw', vals=[x for x in yaw_vals if x>=0], path=data_path, wf=lss_wf)
 
-# pyaws.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
+pyaws.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
 
 #%% Velocity profile: Effect of CT
-cts  = flowcaseGroup(var='ct', vals=ct_vals, path=data_path, wf=lss_wf)
+# cts  = flowcaseGroup(var='ct', vals=ct_vals, path=data_path, wf=lss_wf)
 
-cts.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
+# cts.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
 
 #%% Velocity profile: Effect of T.I.
 # tis  = flowcaseGroup(var='ti', vals=ti_vals, path=data_path, wf=lss_wf)
