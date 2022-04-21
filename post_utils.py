@@ -76,6 +76,7 @@ class windFarm():
         
         # Wind farm coordinates (PyWakeEllipSys convention)
         self.x_AD, self.y_AD = self.get_PWE_coords()
+        self.z_AD = self.zh * np.ones(np.shape(self.x_AD))
     
     def get_PWE_coords(self):
         self.x_AD = np.array(self.x_wt) - (self.x_wt[-1]-self.x_wt[0])/2
@@ -107,6 +108,46 @@ class flowcase():
             }
         return profiles.get(velComp)
     
+    def vel_disc(self, velComp, n, plot=False, FigureSize=None, xlim=None, ylim=None):
+        # Choose velocity component
+        velComps = {
+            'U' : self.U,
+            'V' : self.V
+            }
+        vel = velComps.get(velComp)
+        
+        # Convert turbine number to index
+        n = n - 1
+        
+        ## Initialise totals
+        vel_d = 0 # total contribution of all sampled points
+        ns    = 0 # total number of sampled points
+        
+        # For all points in yz-plane at x == x_t
+        for j in range(len(vel.y)):
+            for k in range(len(vel.z)):
+                in_disc = (((vel.y[j] - self.wf.y_AD[n])/((self.wf.wts[n].D/2)*np.cos(self.wf.yaws[n])))**2 + ((vel.z[k] - self.wf.z_AD[n])/(self.wf.wts[n].D/2))**2) <= 1
+                if in_disc:
+                    vel_d = vel_d + np.interp(self.wf.x_AD[n], vel.x, vel[:,j,k])
+                    ns    = ns + 1 # add to point counter
+        
+        if plot:
+            fig, ax = plt.subplots(1,1,figsize=FigureSize)
+            
+            Y, Z = np.meshgrid(vel.y, vel.z)
+            p = ax.contourf(Y/self.wf.D, Z/self.wf.D, vel.interp(x=self.wf.x_AD[n]).T)
+            draw_AD(ax, 'front', self.wf.y_AD[n]/self.wf.wts[n].D, self.wf.wts[n].zh/self.wf.D, self.wf.wts[n].D/self.wf.D, self.wf.yaws[n])
+            ax.set_xlabel('$y/D$ [-]')
+            ax.set_ylabel('$z/D$ [-]')
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            cbar = fig.colorbar(p)
+            cbar.set_label('${:s}$ [m/s]'.format(velComp))
+            
+            plt.show()
+        
+        return vel_d / ns # average disc velocity
+    
     def plot_contourWithProfiles(self, poss, xlim=None, ylim=(-3,3), levels=100, FigureSize=None):
         # Plot plane of V at hub height for single case with profiles at several downstream positions
         
@@ -128,7 +169,7 @@ class flowcase():
         p = axbig.contourf(self.V_zh.x/self.wf.D, self.V_zh.y/self.wf.D, self.V_zh.T, levels=levels)
         
         # Add actuator disc to plot
-        draw_AD(axbig, 0, 0, self.wf.D/self.wf.D, self.wf.yaws[0])
+        draw_AD(axbig, 'top', 0, 0, self.wf.D/self.wf.D, self.wf.yaws[0])
         
         # Set axes limits
         axbig.set_xlim(xlim); axbig.set_ylim(ylim)
@@ -282,7 +323,7 @@ class flowcase():
         ax.plot(poss, (wc_V-ww_V)/self.wf.D, ls='--', c=list(mcolours)[1])
         
         # Draw actuator disc
-        draw_AD(ax, self.wf.x_AD[0], self.wf.y_AD[0], self.wf.D/self.wf.D, self.wf.yaws[0])
+        draw_AD(ax, 'top', self.wf.x_AD[0], self.wf.y_AD[0], self.wf.D/self.wf.D, self.wf.yaws[0])
         
         # Create legend entries for line styles
         centreline  = mlines.Line2D([], [], color='black', ls='-', label='Centreline')
@@ -446,9 +487,9 @@ class flowcaseGroup():
     
     # def plot_VvelocityProfiles_wr()
             
-def draw_AD(ax,x,y,D,theta):
+def draw_AD(ax,view,x,y,D,yaw):
     '''
-    Draw an actuator disc (AD) at (x,y) rotated theta degrees anticlockwise about its centre.
+    Draw an actuator disc (AD) at (x,y) rotated yaw degrees anticlockwise about its centre.
 
     Parameters
     ----------
@@ -469,15 +510,20 @@ def draw_AD(ax,x,y,D,theta):
 
     '''
     R = D/2
-    theta = theta*np.pi/180
-    # Upper point of rotor
-    x1 = np.sin(theta)*R
-    y1 = np.cos(theta)*R
-    # Lower point of rotor
-    x2 = -x1
-    y2 = -y1
-    # Plot
-    ax.plot([x+x1,x+x2],[y+y1,y+y2],'k')
+    yaw = yaw*np.pi/180
+    if view == 'top':
+        # Upper point of rotor
+        x1 = np.sin(yaw)*R
+        y1 = np.cos(yaw)*R
+        # Lower point of rotor
+        x2 = -x1
+        y2 = -y1
+        # Plot
+        ax.plot([x+x1,x+x2],[y+y1,y+y2],'k')
+    if view == 'front':
+        xp = np.linspace(x-R,x+R,100)
+        yp = y + np.sqrt(R**2 - xp**2)
+        ax.plot(xp,yp,'k')
     
 def y_to_ys(y,vel):
     '''
