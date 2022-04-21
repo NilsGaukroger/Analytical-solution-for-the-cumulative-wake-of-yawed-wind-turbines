@@ -27,9 +27,9 @@ from post_utils import windTurbine, windFarm, flowcaseGroup
 
 FigureSize = tuple(x/3 for x in [25.87,11.69])
 
-NREL5MW = windTurbine(D=126, zh=90, CT=1.0, TSR=7.5, wr=True)
+NREL5MW = windTurbine(D=126, zh=90, TSR=7.5)
 
-lss_wf = windFarm(Uinf=8, ti=0.04, x_wt=[0], y_wt=[0], wts=[NREL5MW], yaws=[40])
+lss_wf = windFarm(Uinf=8, ti=0.04, x_wt=[0], y_wt=[0], wts=[NREL5MW], yaws=[40], CTs=[0.8], wrs=[True])
 
 data_path = r'C:/Users/nilsg/OneDrive/Documents/EWEM/Thesis/NUMERICAL/PyWakeEllipSys/lss/data/'
 
@@ -44,9 +44,9 @@ pyaws = flowcaseGroup(var='yaw', vals=[x for x in yaw_vals if x>=0], path=data_p
 pyaws.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
 
 #%% Velocity profile: Effect of CT
-# cts  = flowcaseGroup(var='ct', vals=ct_vals, path=data_path, wf=lss_wf)
+cts  = flowcaseGroup(var='ct', vals=ct_vals, path=data_path, wf=lss_wf)
 
-# cts.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
+cts.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
 
 #%% Velocity profile: Effect of T.I.
 # tis  = flowcaseGroup(var='ti', vals=ti_vals, path=data_path, wf=lss_wf)
@@ -86,12 +86,12 @@ cts.plot_LSS([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-4,4), FigureS
 #     fc.plot_SS_fitGaussian([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
 
 #%% Debugging
-plt.subplots(1,1)
-plt.plot(cts.flowcases[0].velocityProfile('V', 10))
-plt.plot(cts.flowcases[1].velocityProfile('V', 10))
-plt.plot(cts.flowcases[2].velocityProfile('V', 10))
-plt.plot(cts.flowcases[3].velocityProfile('V', 10))
-plt.legend()
+# plt.subplots(1,1)
+# plt.plot(cts.flowcases[0].velocityProfile('V', 10))
+# plt.plot(cts.flowcases[1].velocityProfile('V', 10))
+# plt.plot(cts.flowcases[2].velocityProfile('V', 10))
+# plt.plot(cts.flowcases[3].velocityProfile('V', 10))
+# plt.legend()
 
 # for fc in cts.flowcases:
 #     print(fc.wf.wts[0].CT)

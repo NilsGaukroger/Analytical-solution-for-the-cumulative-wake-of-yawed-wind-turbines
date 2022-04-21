@@ -24,13 +24,11 @@ mcolours = mcolors.TABLEAU_COLORS
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class windTurbine():
-    def __init__(self, D, zh, CT, TSR, wr=True, CP=0.47):
+    def __init__(self, D, zh, TSR, CP=0.47):
         self.D   = D   # rotor diameter [m]
         self.zh  = zh  # hub height [m]
-        self.CT  = CT  # thrust coefficient [-]
         self.CP  = CP  # power coefficient [-]
         self.TSR = TSR # tip-speed ratio [-]
-        self.wr  = wr  # wake rotation [Boolean]
         
     def rpm(self, Uinf, yaw):
         '''
@@ -56,13 +54,21 @@ class windTurbine():
         return N
     
 class windFarm():
-    def __init__(self, Uinf, ti, x_wt, y_wt, wts, yaws=None):
+    def __init__(self, Uinf, ti, x_wt, y_wt, wts, yaws=None, CTs=None, wrs=None):
         self.Uinf = Uinf # inflow velocity at hub height
         self.ti   = ti   # inflow turbulence intensity @ zh
         self.x_wt = x_wt # WT x coordinates (original)
         self.y_wt = y_wt # WT y coordinates (original)
         self.wts  = wts  # list of wind turbines
         self.yaws = yaws # yaw angles of turbines (follows order of wts)
+        self.CTs  = CTs  # thrust coefficients [-]
+        self.wrs  = wrs  # wake rotations
+        
+        # Default parameters
+        if CTs is None:
+            self.CTs = [0.8]*len(wts)
+        if wrs is None:
+            self.wrs  = [True]*len(wts)
         
         # Wind farm generalised turbine parameters (NOT ROBUST)
         self.zh   = self.wts[0].zh # hub height [m]
@@ -174,7 +180,7 @@ class flowcase():
             axs[1,0].set_ylabel('$y/D$ [-]')
         else:
             axs[1,0].set_ylabel('$y_V^*/D$ [-]')
-        plt.suptitle('$V_{{z_h}}$ for $\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=$ {:s}'.format(self.wf.yaws[0], self.wf.wts[0].CT, self.wf.ti*100, str(self.wf.wts[0].wr)))
+        plt.suptitle('$V_{{z_h}}$ for $\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=$ {:s}'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100, str(self.wf.wrs[0])))
         
         # Save figure (.pdf and .svg)
         fig.tight_layout()
@@ -224,7 +230,7 @@ class flowcase():
         ax.set_ylim(ylim)
         ax.set_xlabel('$y^*_V/\sigma_{y,V}$ [-]')
         ax.set_ylabel('$V/V_c$ [-]')
-        ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=${:s}'.format(self.wf.yaws[0], self.wf.wts[0].CT, self.wf.ti*100, str(self.wf.wts[0].wr)))
+        ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=${:s}'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100, str(self.wf.wrs[0])))
         
         # Add legend
         ax.legend()
@@ -290,7 +296,7 @@ class flowcase():
         # Add axes labels and limits
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$= {:.0f}\%$'.format(self.wf.yaws[0], self.wf.wts[0].CT, self.wf.ti*100))
+        ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$= {:.0f}\%$'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100))
         ax.set_xlabel('$x/D$ [-]')
         ax.set_ylabel('$y/D$ [-]')
         
@@ -325,11 +331,11 @@ class flowcaseGroup():
             if self.var == 'yaw':
                 self.flowcases[i].wf.yaws = [val]
             if self.var == 'ct':
-                self.flowcases[i].wf.wts[0].CT = val
+                self.flowcases[i].wf.CTs = [val]
             if self.var == 'ti':
                 self.flowcases[i].wf.ti = val
             if self.var == 'wr':
-                self.flowcases[i].wf.wts[0].wr   = False
+                self.flowcases[i].wf.wrs   = [val]
                 self.flowcases[i].wf.yaws = [val]
                 self.flowcases[i].load_flowdata()
             self.flowcases[i].load_flowdata()
@@ -361,9 +367,9 @@ class flowcaseGroup():
         
         # Add plot title
         titles = {
-            'yaw' : r'$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.wts[0].CT, flowcase.wf.ti*100, str(flowcase.wf.wts[0].wr)),
-            'ct'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.ti*100, str(flowcase.wf.wts[0].wr)),
-            'ti'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, $C_T = {:.1f}$, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.wts[0].CT, str(flowcase.wf.wts[0].wr))
+            'yaw' : r'$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.CTs[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0])),
+            'ct'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0])),
+            'ti'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, $C_T = {:.1f}$, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.CTs[0], str(flowcase.wf.wrs[0]))
             }
         ax.set_title(titles.get(self.var))
         
@@ -414,13 +420,13 @@ class flowcaseGroup():
                 axs[i].set_ylabel('$V/V_c$ [-]')
             titles = {
                 'yaw' : r'$\gamma = {:d}^\circ$'.format(flowcase.wf.yaws[0]),
-                'ct'  : r'$C_T = {:.1f}$'.format(flowcase.wf.wts[0].CT),
+                'ct'  : r'$C_T = {:.1f}$'.format(flowcase.wf.CTs[0]),
                 'ti'  : r'T.I.$={:.0f}\%$'.format(flowcase.wf.ti*100)
                 }
             suptitles = {
-                'yaw' : r'$C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(flowcase.wf.wts[0].CT, flowcase.wf.ti*100),
+                'yaw' : r'$C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(flowcase.wf.CTs[0], flowcase.wf.ti*100),
                 'ct' : r'$\gamma = {:d}^\circ$, T.I.$= {:.0f}$%'.format(flowcase.wf.yaws[0], flowcase.wf.ti*100),
-                'ti' : r'$\gamma = {:d}^\circ$, $C_T = {:.1f}$'.format(flowcase.wf.yaws[0], flowcase.wf.wts[0].CT)
+                'ti' : r'$\gamma = {:d}^\circ$, $C_T = {:.1f}$'.format(flowcase.wf.yaws[0], flowcase.wf.CTs[0])
                 }
             axs[i].set_title(titles.get(self.var))
             fig.suptitle(suptitles.get(self.var))
