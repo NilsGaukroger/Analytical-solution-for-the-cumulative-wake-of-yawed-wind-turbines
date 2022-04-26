@@ -232,7 +232,7 @@ class flowcase():
         fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
         fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
     
-    def plot_SS_fitGaussian(self, poss, wcm, wwm, ylim=(0,None), xlim=None, FigureSize=None):
+    def plot_SS_fitGaussian(self, poss, wcm, wwm, velComp = 'V', ylim=(0,None), xlim=None, FigureSize=None):
         
         # Create subplots object
         fig, ax = plt.subplots(1,1,figsize=FigureSize)
@@ -245,6 +245,8 @@ class flowcase():
         for ip, pos in enumerate(poss):
             # Extract profile
             V_pr = self.velocityProfile('V', pos)
+            if velComp == 'U':
+                V_pr = self.velocityProfile('U', pos)
             
             # Calculate wake centre velocity
             _, V_c = wakeCentre(wcm, V_pr.y, V_pr)
@@ -259,18 +261,29 @@ class flowcase():
             # Fit Gaussian
             if wwm == 'Gaussian' or 'integral':
                 amps[ip], mus[ip], sigs[ip], _ = fit_Gaussian(V_pr.y, V_pr/V_c)
-                amp = np.mean(amps)
+                # amp = np.mean(amps)
+                amp = 1 # pin amplitude at 1
                 mu  = np.mean(mus)
                 sig = np.mean(sigs)
             
         # Plot average fitted Gaussian
-        ax.plot(y_to_ys(V_pr.y, V_pr)/sig, Gaussian(V_pr.y, amp, mu, sig), c='k', ls='--', label='Gaussian')
+        ax.plot(V_pr.y/sig, Gaussian(V_pr.y, 1, 0, sig), c='k', ls='--', label='Gaussian')
+        
+        # Add note with parameters of Gaussian
+        # lab = 'Amplitude = {:d},\n$\overline{{\mu}} = {:.1f}$,\n$\overline{{\sigma_{{y,V}}}} = {:.1f}$'.format(amp, mu, sig)
+        lab = '$\sigma_{{y,V}}|_{{x/D = {:d}}} = {:.0f}$'.format(poss[-1], sigs[-1])
+        if velComp == 'U':
+            lab = '$\sigma_{{y,U}}|_{{x/D = {:d}}} = {:.0f}$'.format(poss[-1], sigs[-1])
+        ax.text(0.02, 0.95, lab, horizontalalignment='left', verticalalignment='top', transform=ax.transAxes)
             
         # Add axes limits and labels
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
         ax.set_xlabel('$y^*_V/\sigma_{y,V}$ [-]')
         ax.set_ylabel('$V/V_c$ [-]')
+        if velComp == 'U':
+            ax.set_xlabel('$y^*_U/\sigma_{y,U}$ [-]')
+            ax.set_ylabel('$(U_\infty - U)/U_c$ [-]')
         ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=${:s}'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100, str(self.wf.wrs[0])))
         
         # Add legend
@@ -278,12 +291,14 @@ class flowcase():
         
         # Save figure (.pdf and .svg)
         plt.show()
-        filename = 'SS_fitGaussian'
+        filename = '{:s}_SS_fitGaussian'.format(velComp)
         figpath  = 'fig/yaw/' + str(self.wf.yaws[0]) + '/'
         if not os.path.exists(figpath): # if the directory doesn't exist create it
             os.makedirs(figpath)
         fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
         fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
+        
+        return amp, mu, sig
     
     def plot_wakeCentreAndEdges(self, poss, wcm, wwm, xlim=None, ylim=None, FigureSize=None):
         # Create lists for wake centres and wake widths
@@ -375,8 +390,8 @@ class flowcaseGroup():
                 self.flowcases[i].wf.CTs = [val]
             if self.var == 'ti':
                 self.flowcases[i].wf.ti = val
-            if self.var == 'wr':
-                self.flowcases[i].wf.wrs   = [val]
+            if self.var == 'nwr':
+                self.flowcases[i].wf.wrs  = [False]
                 self.flowcases[i].wf.yaws = [val]
                 self.flowcases[i].load_flowdata()
             self.flowcases[i].load_flowdata()
@@ -386,7 +401,8 @@ class flowcaseGroup():
         varlabels = {
             'yaw':['$\gamma$','$^\circ$'],
             'ct':['$C_T$',''],
-            'ti':['T.I.','']
+            'ti':['T.I.',''],
+            'nwr':['$\gamma$','$^\circ$']
             }
         
         # Create subplots object
@@ -410,7 +426,8 @@ class flowcaseGroup():
         titles = {
             'yaw' : r'$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.CTs[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0])),
             'ct'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0])),
-            'ti'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, $C_T = {:.1f}$, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.CTs[0], str(flowcase.wf.wrs[0]))
+            'ti'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, $C_T = {:.1f}$, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.CTs[0], str(flowcase.wf.wrs[0])),
+            'nwr' : r'$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.CTs[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0]))
             }
         ax.set_title(titles.get(self.var))
         
@@ -485,7 +502,122 @@ class flowcaseGroup():
         fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
         fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
     
-    # def plot_VvelocityProfiles_wr()
+def plot_VvelocityProfiles_wr(wr, nwr, pos, xlim=None, ylim=None, FigureSize=None):
+    # Create subplots object
+    fig, ax = plt.subplots(1, 1, figsize=FigureSize)
+    
+    # Group two flowcaseGroups
+    c = [wr.flowcases, nwr.flowcases]
+    
+    # Create empty list for legend handles
+    wr_plot = []
+    
+    for i in range(np.shape(c)[1]):
+        # Extract profiles
+        V_pr_wr  = c[0][i].velocityProfile('V', pos)
+        V_pr_nwr = c[1][i].velocityProfile('V', pos)
+        
+        # Plot profile with label
+        lab = '$\gamma = $' + str(c[0][i].wf.yaws[0]) + '$^\circ$'
+        l1, = ax.plot(V_pr_wr.y/c[0][i].wf.D, V_pr_wr, label=lab, ls='-', c=list(mcolours)[i])
+        wr_plot.append(l1)
+        ax.plot(V_pr_nwr.y/c[1][i].wf.D, V_pr_nwr, ls='--', c=list(mcolours)[i])
+    
+    # Create legend entries for line styles
+    solid_line = mlines.Line2D([], [], color='black', ls='-', label='On')
+    dashed_line = mlines.Line2D([], [], color='black', ls='--', label='Off')
+    
+    # Add axes limits and labels
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xlabel('$y/D$ [-]')
+    ax.set_ylabel('$V$ [m/s]')
+    ax.set_title('$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(pos, c[0][i].wf.CTs[0], c[0][i].wf.ti*100))
+    
+    # Add legends
+    yaw_legend = plt.legend(handles=wr_plot, loc='upper left')
+    plt.gca().add_artist(yaw_legend)
+    ax.legend(handles=[solid_line, dashed_line], loc = 'upper right', title='Wake rotation')
+    
+    # Save figure (.pdf and .svg)
+    # fig.tight_layout()
+    plt.show()
+    filename = 'VvelocityProfile'
+    figpath  = 'fig/wr/'
+    if not os.path.exists(figpath): # if the directory doesn't exist create it
+        os.makedirs(figpath)
+    fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
+    fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
+    
+def plot_LSS_wr(wr, nwr, poss, wcm, wwm, xlim=None, ylim=None, FigureSize=None):
+    # Create subplots object
+    fig, axs = plt.subplots(2, 2, figsize=FigureSize, sharex=True, sharey=True)
+    
+    # Make axes indexing 1D
+    axs = np.ravel(axs)
+    
+    # Group two flowcaseGroups
+    c = [wr.flowcases, nwr.flowcases]
+    
+    for i in range(np.shape(c)[1]):
+        # Create empty list for legend handles
+        wr_plot = []
+        
+        for ip, pos in enumerate(poss):
+            # Extract profiles
+            V_pr_wr  = c[0][i].velocityProfile('V', pos)
+            V_pr_nwr = c[1][i].velocityProfile('V', pos)
+            
+            # Calculate wake centre velocities
+            _, V_c_wr  = wakeCentre(wcm, V_pr_wr.y, V_pr_wr)
+            _, V_c_nwr = wakeCentre(wcm, V_pr_nwr.y, V_pr_nwr)
+            
+            # Calculate wake widths
+            sigma_wr   = wakeWidth(wwm, V_pr_wr.y, V_pr_wr)
+            sigma_nwr  = wakeWidth(wwm, V_pr_nwr.y, V_pr_nwr)
+            
+            # Plot profiles with labels
+            lab = '$x/D = {:d}$'.format(pos)
+            if c[0][i].wf.yaws[0] == 0: # if yaw = 0 deg,  use y-coords
+                l1, = axs[i].plot(V_pr_wr.y/sigma_wr, V_pr_wr/V_c_wr, label=lab, ls='-', c=list(mcolours)[ip])
+                wr_plot.append(l1)
+                axs[i].plot(V_pr_nwr.y/sigma_nwr, V_pr_nwr/V_c_nwr, ls='--', c=list(mcolours)[ip])
+            else: # use y*
+                l1, = axs[i].plot(y_to_ys(V_pr_wr.y, V_pr_wr)/sigma_wr, V_pr_wr/V_c_wr, label=lab, ls='-', c=list(mcolours)[ip])
+                wr_plot.append(l1)
+                axs[i].plot(y_to_ys(V_pr_nwr.y, V_pr_nwr)/sigma_nwr, V_pr_nwr/V_c_nwr, ls='--', c=list(mcolours)[ip])
+        
+        # Add axes limits and labels
+        axs[i].set_xlim(xlim)
+        axs[i].set_ylim(ylim)
+        if i > 1:
+            if c[0][i].wf.yaws[0] == 0:
+                axs[i].set_xlabel('$y/\sigma_{y,V}$')
+            else:
+                axs[i].set_xlabel('$y^*_V/\sigma_{y,V}$')
+        if i%2 == 0:
+            axs[i].set_ylabel('$V/V_c$ [-]')
+        axs[i].set_title(r'$\gamma = {:d}^\circ$'.format(c[0][i].wf.yaws[0]))
+        fig.suptitle(r'$C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(c[0][i].wf.CTs[0], c[0][i].wf.ti*100))
+    
+    # Create legend entries for line styles
+    solid_line = mlines.Line2D([], [], color='black', ls='-', label='On')
+    dashed_line = mlines.Line2D([], [], color='black', ls='--', label='Off')    
+    
+    # Add legends
+    yaw_legend = plt.legend(handles=wr_plot, loc='center left', bbox_to_anchor=(1.025,1.7))
+    plt.gca().add_artist(yaw_legend)
+    axs[i].legend(handles=[solid_line, dashed_line], loc = 'center left', bbox_to_anchor=(1.025, 0.5), title='Wake rotation')
+    
+    # Save figure (.pdf and .svg)
+    # fig.tight_layout()
+    plt.show()
+    filename = 'LSS'
+    figpath  = 'fig/wr/'
+    if not os.path.exists(figpath): # if the directory doesn't exist create it
+        os.makedirs(figpath)
+    fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
+    fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
             
 def draw_AD(ax,view,x,y,D,yaw):
     '''

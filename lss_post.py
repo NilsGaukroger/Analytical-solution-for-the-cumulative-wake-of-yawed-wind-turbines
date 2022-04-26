@@ -23,7 +23,7 @@ os.chdir('C:/Users/nilsg/OneDrive/Documents/EWEM/Thesis/NUMERICAL/PyWakeEllipSys
 
 from post_utils import windTurbine, windFarm, flowcaseGroup
 # from post_utils import flowcase
-# import post_utils as pu
+import post_utils as pu
 
 FigureSize = tuple(x/3 for x in [25.87,11.69])
 
@@ -53,10 +53,10 @@ tis  = flowcaseGroup(var='ti', vals=ti_vals, path=data_path, wf=lss_wf)
 
 tis.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
 
-#%% Velocity profile: Effect of W.R.
-# nwr  = flowcaseGroup(var='wr', vals=yaw_vals, path=data_path, wf=lss_wf)
+#%% Velocity profile: Effect of wake rotation
+nwr_pyaws = flowcaseGroup(var='nwr', vals=[x for x in yaw_vals if x>=0], path=data_path, wf=lss_wf)
 
-# nwr.plot_VvelocityProfiles(pos=10, xlim=(-5,5), FigureSize=FigureSize)
+pu.plot_VvelocityProfiles_wr(pyaws, nwr_pyaws, 10, xlim=(-5,5), FigureSize=FigureSize)
 
 #%% Velocity profile: Effect of downstream distance
 for fc in pyaws.flowcases:
@@ -65,16 +65,20 @@ for fc in pyaws.flowcases:
 #%% Self-similarity: Effect of yaw angle
 pyaws_no0 = flowcaseGroup(var='yaw', vals=[x for x in yaw_vals if x>0], path=data_path, wf=lss_wf)
 
-pyaws_no0.plot_LSS([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
+pyaws_no0.plot_LSS([5,7,9,11,13], wcm='max', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
 
 #%% Self-similarity: Effect of CT
-cts.plot_LSS([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
+cts.plot_LSS([5,7,9,11,13], wcm='max', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
 
 #%% Self-similarity: Effect of T.I.
-tis.plot_LSS([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
+tis.plot_LSS([5,7,9,11,13], wcm='max', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
 
 #%% Self-similarity: Effect of W.R.
-# wr.plot_LSS([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-5,5))
+pyaws_no0 = flowcaseGroup(var='yaw', vals=[x for x in yaw_vals if x>0], path=data_path, wf=lss_wf)
+
+nwr_pyaws_no0 = flowcaseGroup(var='nwr', vals=[x for x in yaw_vals if x>0], path=data_path, wf=lss_wf)
+
+pu.plot_LSS_wr(pyaws_no0, nwr_pyaws_no0, poss=[5,7,9,11,13], wcm='max', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
 
 #%% Wake centres and edges
 poss = np.linspace(3,29,100)
@@ -82,21 +86,13 @@ for fc in pyaws_no0.flowcases:
     fc.plot_wakeCentreAndEdges(poss, wcm='Gaussian', wwm='integral', xlim=(-1,np.max(poss)), ylim=(-3,3), FigureSize=FigureSize)
     
 #%% Self-similarity: Fitted Gaussian
-for fc in pyaws_no0.flowcases:
-    fc.plot_SS_fitGaussian([5,7,9,11,13], wcm='Gaussian', wwm='Gaussian', xlim=(-4,4), FigureSize=FigureSize)
+fcs = pyaws_no0.flowcases
+sigma = np.empty((len(fcs)))
+for i, fc in enumerate(fcs):
+    _, _, sigma[i] = fc.plot_SS_fitGaussian([5,7,9,11,13], wcm='max', wwm='Gaussian', velComp='U', xlim=(-4,4), FigureSize=FigureSize)
 
 #%% Debugging
-# plt.subplots(1,1)
-# plt.plot(cts.flowcases[0].velocityProfile('V', 10))
-# plt.plot(cts.flowcases[1].velocityProfile('V', 10))
-# plt.plot(cts.flowcases[2].velocityProfile('V', 10))
-# plt.plot(cts.flowcases[3].velocityProfile('V', 10))
-# plt.legend()
 
-# for fc in cts.flowcases:
-#     print(fc.wf.wts[0].CT)
-#     plt.plot(fc.velocityProfile('V', 10))
-# plt.legend()
 
 #%% Deleting fig folder
 # import shutil
