@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon Apr 11 14:24:57 2022
+Created on Thu Jul 14 11:14:50 2022
 
 @author: nilsg
 """
@@ -9,22 +9,19 @@ import numpy as np
 import xarray
 import warnings
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os
-import copy
 import scipy.integrate as spi
 from scipy.optimize import curve_fit
-import matplotlib.colors as mcolors
-import matplotlib.lines as mlines
+from lateralSolution import lateralSolution
+from streamwiseSolution import streamwiseSolution
+import time
+from analytical_functions import vel_disc, NREL5MW
 
-# Create object for default matplotlib line colours
-mcolours = mcolors.TABLEAU_COLORS
-
-# Suppress FutureWarnings
+# Suppress FutureWarnings (for xarray)
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class windTurbine():
-    def __init__(self, D, zh, TSR, CP=0.47):
+    def __init__(self, D, zh, TSR=None, CP=0.47):
         self.D   = D   # rotor diameter [m]
         self.zh  = zh  # hub height [m]
         self.CP  = CP  # power coefficient [-]
@@ -57,571 +54,302 @@ class windFarm():
     def __init__(self, Uinf, ti, x_wt, y_wt, wts, yaws=None, CTs=None, wrs=None):
         self.Uinf = Uinf # inflow velocity at hub height
         self.ti   = ti   # inflow turbulence intensity @ zh
-        self.x_wt = x_wt # WT x coordinates (original)
-        self.y_wt = y_wt # WT y coordinates (original)
+        self.x_wt = np.asarray(x_wt) # WT x coordinates (original)
+        self.y_wt = np.asarray(y_wt) # WT y coordinates (original)
         self.wts  = wts  # list of wind turbines
-        self.yaws = yaws # yaw angles of turbines (follows order of wts)
+        self.n_wt = len(wts) # number of wind turbines
+        self.yaws = np.deg2rad(np.asarray(yaws)) # yaw angles of turbines (follows order of wts)
         self.CTs  = CTs  # thrust coefficients [-]
-        self.wrs  = wrs  # wake rotations
         
         # Default parameters
         if CTs is None:
-            self.CTs = [0.8]*len(wts)
+            self.CTs = [0.8]*self.n_wt
         if wrs is None:
-            self.wrs  = [True]*len(wts)
+            self.wrs  = [True]*self.n_wt
         
         # Wind farm generalised turbine parameters (NOT ROBUST)
         self.zh   = self.wts[0].zh # hub height [m]
         self.D    = self.wts[0].D  # rotor diameter [m]
         
+        self.z_wt = [self.zh] * self.n_wt # WT z coordinates
+        
         # Wind farm coordinates (PyWakeEllipSys convention)
-        self.x_AD, self.y_AD = self.get_PWE_coords()
+        self.x_AD, self.y_AD = get_PWE_coords(self.x_wt, self.y_wt)
         self.z_AD = self.zh * np.ones(np.shape(self.x_AD))
     
-    def get_PWE_coords(self):
-        self.x_AD = np.array(self.x_wt) - (self.x_wt[-1]-self.x_wt[0])/2
-        self.y_AD = np.array(self.y_wt)
-        return self.x_AD, self.y_AD
-    
 class flowcase():
-    def __init__(self, infile, wf):
-        self.infile = infile # flowdata.nc filepath
-        self.wf     = wf     # wf instance of flowcase
+    def __init__(self, dir_path, wf, cD):
+        self.dir_path = dir_path # flowdata.nc directory path
+        self.wf       = wf       # wf instance of flowcase
+        self.cD       = cD       # cells per diameter
         
         # Load flow data upon initialisation
         self.load_flowdata()
+        self.load_flowdata_remove()
+        self.flowdata_diff()
     
     def load_flowdata(self):
         # Load full 3D flow data as xarray.Dataset
-        self.flowdata = xarray.open_dataset(self.infile)
+        self.flowdata = xarray.open_dataset(self.dir_path + 'flowdata.nc')
         
         # Define useful variables
         self.U    = self.flowdata.U
         self.U_zh = self.flowdata.U.interp(z=self.wf.zh)
         self.V    = self.flowdata.V
         self.V_zh = self.flowdata.V.interp(z=self.wf.zh)
+        self.U_total = np.sqrt(self.flowdata.U**2 + self.flowdata.V**2 + self.flowdata.W**2)
+        self.U_total_zh = self.U_total.interp(z=self.wf.zh)
     
-    def velocityProfile(self, velComp, pos):
-        profiles = {
-            'U' : self.wf.Uinf - self.U_zh.interp(x = self.wf.x_AD[0] + pos*self.wf.D),
-            'V' : self.V_zh.interp(x = self.wf.x_AD[0] + pos*self.wf.D)
-            }
+    def load_flowdata_remove(self):
+        # Load flow data with turbines removed
+        self.flowdata_remove = [0] * self.wf.n_wt
+        for i_wt in range(self.wf.n_wt):
+            dir_path = self.dir_path + 'remove/' + str(i_wt)
+            if os.path.exists(dir_path):
+                self.flowdata_remove[i_wt] = xarray.open_dataset(dir_path + '/flowdata.nc')
+    
+    def flowdata_diff(self):
+        self.flowdata_diff = [0] * self.wf.n_wt
+        self.Udef          = [0] * self.wf.n_wt
+        self.Udef_zh       = [0] * self.wf.n_wt
+        self.Vdef          = [0] * self.wf.n_wt
+        self.Vdef_zh       = [0] * self.wf.n_wt
+        for i_wt in range(self.wf.n_wt):
+            if self.flowdata_remove[i_wt] != 0:
+                # Shift flowdata.variables such that first turbine is at x = 0
+                # Create x_wt_r and y_wt_r and then calculate the shift required to convert them to x_AD_r and y_AD_r then shift by this amount
+                x_wt_r = np.delete(self.wf.x_wt, i_wt)
+                y_wt_r = np.delete(self.wf.y_wt, i_wt)
+                
+                # Calculate difference between original wf centre and wf centre with turbine removed
+                x_shift = (np.ptp(x_wt_r) - np.ptp(self.wf.x_wt)) / 2
+                y_shift = (np.ptp(y_wt_r) - np.ptp(self.wf.y_wt)) / 2
+                
+                # Shift flowdata
+                self.flowdata_remove[i_wt] = self.flowdata_remove[i_wt].shift(x = int(x_shift*self.cD), y = int(y_shift*self.cD))
+                
+                # Calculate deficits
+                self.flowdata_diff[i_wt] = self.flowdata_remove[i_wt] - self.flowdata
+                
+                # Define useful variables
+                self.Udef[i_wt] = self.flowdata_diff[i_wt].U
+                self.Udef_zh[i_wt] = self.Udef[i_wt].interp(z=self.wf.zh)
+                self.Vdef[i_wt] = -self.flowdata_diff[i_wt].V
+                self.Vdef_zh[i_wt] = self.Vdef[i_wt].interp(z=self.wf.zh)
+    
+    def velocityProfile(self, velComp, pos, WT):
+        if all([isinstance(x, int) for x in self.Udef]):
+            profiles = {
+                'U' : self.U_zh.interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D),
+                'V' : self.V_zh.interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D),
+                'Udef' : self.wf.Uinf - self.U_zh.interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D)
+                }
+        else:
+            profiles = {
+                'U' : self.U_zh.interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D),
+                'V' : self.V_zh.interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D),
+                'Udef' : self.Udef_zh[WT].interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D),
+                'Vdef' : self.Vdef_zh[WT].interp(x = self.wf.x_AD[WT]*self.wf.D + pos*self.wf.D)
+                }
         return profiles.get(velComp)
     
-    def vel_disc(self, velComp, n, plot=False, FigureSize=None, xlim=None, ylim=None):
-        # Choose velocity component
-        velComps = {
-            'U' : self.U,
-            'V' : self.V
-            }
-        vel = velComps.get(velComp)
+    def analytical_solution(self, method, removes = [], U_h=None, V_h=0, rho=1.225):
+        '''
+        Computes streamwise and lateral velocity fields for flowcase using analytical solution.
+
+        Parameters
+        ----------
+        method : string
+            Version of the conservation of momentum deficit to be used, either "original" or "modified". See Bastankhah et al., 2021, for further details.
+        U_h : float, optional
+            Hub height streamwise velocity. By default this is interpolated from the inflow profile in PyWakeEllipSys, so may not be exactly equal to the value specified in the PyWakeEllipSys run script.
+        V_h : float, optional
+            Hub height lateral velocity. The default is 0.
+        rho : float, optional
+            Air density [kg/m^3]. The default is 1.225.
+
+        Returns
+        -------
+        U : Array of float64 (nx,ny,nz)
+            Streamwise velocity field.
+        V : Array of float64 (nx,ny,nz)
+            Lateral velocity field.
+
+        '''
+        # Define turbine z positions
+        z_t = self.wf.zh * np.ones((self.wf.n_wt))
+
+        # Sort turbine x, y, z positions by increasing x
+        idx = np.argsort(self.wf.x_wt)
+        x_t = self.wf.x_wt[idx]
+        y_t = self.wf.y_wt[idx]
+        z_t = z_t[idx]
+        yaws = self.wf.yaws[idx]
+
+        ## Flow domain
+        x = self.flowdata.x.values
+        y = self.flowdata.y.values
+        z = self.flowdata.z.values
+
+        nx, ny, nz = len(x), len(y), len(z)
+
+        ## Inflow
+        # Preallocate analytical velocity field
+        U0 = np.zeros((nx, ny, nz)) # streamwise velocity
+        V0 = np.zeros((nx, ny, nz)) # lateral velocity
         
-        # Convert turbine number to index
-        n = n - 1
+        # Convert from total T.I. to streamwise T.I.
+        I0 = 0.8 * self.wf.ti
+
+        # Preallocate streamwise velocity field with flowcase inflow
+        U_in = self.flowdata.U.values[0,0,:]
+        if U_h is None:
+            U_h  = np.interp(self.wf.zh, self.flowdata.z.values, U_in)
+
+        U0[:, :, :] = U_in
+
+        ## Deficit
+        # Preallocate velocities for removed turbines
+        flowdata_remove = [0] * self.wf.n_wt
+
+        ## Run solution
+        start_time = time.time() # start timer
+        flowdata, P = lateralSolution(method, self.wf.n_wt, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, rho, self.wf.zh, self.wf.D)
+        for i_t in removes:
+            # remove turbine from layout
+            x_t_r = np.delete(self.wf.x_wt, i_t)
+            y_t_r = np.delete(self.wf.y_wt, i_t)
+            z_t_r = self.wf.zh * np.ones((self.wf.n_wt-1))
+            # remove value from yaws
+            yaws_r = np.delete(yaws, i_t)
+            # run solution
+            flowdata_remove[i_t], _ = lateralSolution(method, self.wf.n_wt-1, x_t_r, y_t_r, z_t_r, yaws_r, x, y, z, U0, U_h, V0, I0, rho, self.wf.zh, self.wf.D)
+        end_time = time.time() # end timer
         
-        ## Initialise totals
-        vel_d = 0 # total contribution of all sampled points
-        ns    = 0 # total number of sampled points
+        ## Calculate deficits
+        flowdata_def = [0] * self.wf.n_wt
+        for i_t in range(self.wf.n_wt):
+            if flowdata_remove[i_t] != 0:
+                flowdata_def[i_t] = flowdata_remove[i_t] - flowdata
+
+        ## Timing
+        execution_time = end_time - start_time
+        mins = execution_time // 60
+        secs = execution_time % 60
+        print("Solution execution time: {:.0f}m {:.1f}s".format(mins, secs))
         
-        # For all points in yz-plane at x == x_t
-        for j in range(len(vel.y)):
-            for k in range(len(vel.z)):
-                in_disc = (((vel.y[j] - self.wf.y_AD[n])/((self.wf.wts[n].D/2)*np.cos(self.wf.yaws[n])))**2 + ((vel.z[k] - self.wf.z_AD[n])/(self.wf.wts[n].D/2))**2) <= 1
-                if in_disc:
-                    vel_d = vel_d + np.interp(self.wf.x_AD[n], vel.x, vel[:,j,k])
-                    ns    = ns + 1 # add to point counter
-        
-        if plot:
-            fig, ax = plt.subplots(1,1,figsize=FigureSize)
-            
-            Y, Z = np.meshgrid(vel.y, vel.z)
-            p = ax.contourf(Y/self.wf.D, Z/self.wf.D, vel.interp(x=self.wf.x_AD[n]).T)
-            draw_AD(ax, 'front', self.wf.y_AD[n]/self.wf.wts[n].D, self.wf.wts[n].zh/self.wf.D, self.wf.wts[n].D/self.wf.D, self.wf.yaws[n])
-            ax.set_xlabel('$y/D$ [-]')
-            ax.set_ylabel('$z/D$ [-]')
-            ax.set_xlim(xlim)
-            ax.set_ylim(ylim)
-            cbar = fig.colorbar(p)
-            cbar.set_label('${:s}$ [m/s]'.format(velComp))
-            
-            plt.show()
-        
-        return vel_d / ns # average disc velocity
+        return flowdata, flowdata_def, P, U_h
     
-    def plot_contourWithProfiles(self, poss, xlim=None, ylim=(-3,3), levels=100, FigureSize=None):
-        # Plot plane of V at hub height for single case with profiles at several downstream positions
+    def streamwiseSolution(self, method, removes = [], U_h=None, rho=1.225):
+        '''
+        Computes streamwise and lateral velocity fields for flowcase using analytical solution.
+
+        Parameters
+        ----------
+        method : string
+            Version of the conservation of momentum deficit to be used, either "original" or "modified". See Bastankhah et al., 2021, for further details.
+        U_h : float, optional
+            Hub height streamwise velocity. By default this is interpolated from the inflow profile in PyWakeEllipSys, so may not be exactly equal to the value specified in the PyWakeEllipSys run script.
+        rho : float, optional
+            Air density [kg/m^3]. The default is 1.225.
+
+        Returns
+        -------
+        U : Array of float64 (nx,ny,nz)
+            Streamwise velocity field.
+
+        '''
+        # Define turbine z positions
+        z_t = self.wf.zh * np.ones((self.wf.n_wt))
+
+        # Sort turbine x, y, z positions by increasing x
+        idx = np.argsort(self.wf.x_wt)
+        x_t = self.wf.x_wt[idx]
+        y_t = self.wf.y_wt[idx]
+        z_t = z_t[idx]
+        yaws = self.wf.yaws[idx]
+
+        ## Flow domain
+        x = self.flowdata.x.values
+        y = self.flowdata.y.values
+        z = self.flowdata.z.values
+
+        nx, ny, nz = len(x), len(y), len(z)
+
+        ## Inflow
+        # Preallocate analytical velocity field
+        U0 = np.zeros((nx, ny, nz)) # streamwise velocity
+
+        # Preallocate streamwise velocity field with flowcase inflow
+        U_in = self.flowdata.U.values[0,0,:]
+        if U_h is None:
+            U_h  = np.interp(self.wf.zh, self.flowdata.z.values, U_in)
+
+        U0[:, :, :] = U_in
+
+        ## Deficit
+        # Preallocate velocities for removed turbines
+        flowdata_remove = [0] * self.wf.n_wt
+
+        ## Run solution
+        start_time = time.time() # start timer
+        flowdata, P = streamwiseSolution(method, self.wf.n_wt, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, self.wf.ti, rho, self.wf.zh, self.wf.D)
+        for i_t in removes:
+            # remove turbine from layout
+            x_t_r = np.delete(self.wf.x_wt, i_t)
+            y_t_r = np.delete(self.wf.y_wt, i_t)
+            z_t_r = self.wf.zh * np.ones((self.wf.n_wt-1))
+            # remove value from yaws
+            yaws_r = np.delete(yaws, i_t)
+            # run solution
+            flowdata_remove[i_t], _ = streamwiseSolution(method, self.wf.n_wt-1, x_t_r, y_t_r, z_t_r, yaws_r, x, y, z, U0, U_h, self.wf.ti, rho, self.wf.zh, self.wf.D)
+        end_time = time.time() # end timer
         
-        # Set default xlim according to poss
-        if xlim is None:
-            xlim = (-2, np.max(poss)+1)
+        ## Calculate deficits
+        flowdata_def = [0] * self.wf.n_wt
+        for i_t in range(self.wf.n_wt):
+            if flowdata_remove[i_t] != 0:
+                flowdata_def[i_t] = flowdata_remove[i_t] - flowdata
+
+        ## Timing
+        execution_time = end_time - start_time
+        mins = execution_time // 60
+        secs = execution_time % 60
+        print("Solution execution time: {:.0f}m {:.1f}s".format(mins, secs))
         
-        fig, axs = plt.subplots(2, len(poss), figsize=FigureSize, sharey=True)
-        gs = axs[0,0].get_gridspec() # get geometry of subplot grid
-        
-        # Remove top row of subplots
-        for ax in axs[0,:]:
-            ax.remove()
-            
-        # Replace with a single plot spanning the whole width
-        axbig = fig.add_subplot(gs[0,:])
-        
-        # Plot contour of lateral velocity at hub height
-        p = axbig.contourf(self.V_zh.x/self.wf.D, self.V_zh.y/self.wf.D, self.V_zh.T, levels=levels)
-        
-        # Add actuator disc to plot
-        draw_AD(axbig, 'top', 0, 0, self.wf.D/self.wf.D, self.wf.yaws[0])
-        
-        # Set axes limits
-        axbig.set_xlim(xlim); axbig.set_ylim(ylim)
-        
-        # Add colourbar
-        divider = make_axes_locatable(axbig)
-        cax     = divider.append_axes('right', size='5%', pad=0.05)
-        cbar    = fig.colorbar(p, ax=axbig, cax=cax)
-        cbar.set_label('$V$ [m/s]')
-        
-        # Preallocate for running maximum / minimum
-        Vmax = -np.inf
-        Vmin = 0
-        
-        for ip, pos in enumerate(poss):
-            # Add lines to contour plot to show planes
-            axbig.vlines(pos, ylim[0], ylim[1], color='k', ls='--')
-            
-            # Extract profile velocities
-            V_pr = self.velocityProfile('V', pos)
-            
-            # Plot profiles
-            if self.wf.yaws[0] == 0: # plot against y
-                axs[1,ip].plot(V_pr, V_pr.y/self.wf.D)
-            else: # plot against y*
-                axs[1,ip].plot(V_pr, y_to_ys(V_pr.y, V_pr)/self.wf.D)
-                
-            # Add axes limits and labels
-            axs[1,ip].set_ylim(ylim)
-            axs[1,ip].set_xlabel('$V$ [m/s]')
-            
-            # Label each plot with x/D
-            lab = r'$%.0fD$' % pos
-            axs[1,ip].text(0.98, 0.95, lab, horizontalalignment='right', verticalalignment='top', transform=axs[1,ip].transAxes)
-            
-            # calculate overall velocity limits
-            mn = np.nanmin(V_pr.values)
-            if mn < Vmin:
-                Vmin = mn
-            mx = np.nanmax(V_pr.values)
-            if mx > Vmax:
-                Vmax = mx
-        
-        # set velocity axis limits
-        for ip in range(len(poss)):
-            axs[1,ip].set_xlim(Vmin*1.05,Vmax*1.05)
-            
-        if self.wf.yaws[0] == 0:
-            axs[1,0].set_ylabel('$y/D$ [-]')
-        else:
-            axs[1,0].set_ylabel('$y_V^*/D$ [-]')
-        plt.suptitle('$V_{{z_h}}$ for $\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=$ {:s}'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100, str(self.wf.wrs[0])))
-        
-        # Save figure (.pdf and .svg)
-        fig.tight_layout()
-        filename = 'contourWithProfiles'
-        figpath  = 'fig/yaw/' + str(self.wf.yaws[0]) + '/'
-        if not os.path.exists(figpath): # if the directory doesn't exist create it
-            os.makedirs(figpath)
-        fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-        fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
+        return flowdata, flowdata_def, P, U_h
     
-    def plot_SS_fitGaussian(self, poss, wcm, wwm, velComp = 'V', ylim=(0,None), xlim=None, FigureSize=None):
-        
-        # Create subplots object
-        fig, ax = plt.subplots(1,1,figsize=FigureSize)
-        
-        # Preallocate arrays for fitting parameters
-        amps = np.empty((len(poss)))
-        mus  = np.empty((len(poss)))
-        sigs = np.empty((len(poss)))
-        
-        for ip, pos in enumerate(poss):
-            # Extract profile
-            V_pr = self.velocityProfile('V', pos)
-            if velComp == 'U':
-                V_pr = self.velocityProfile('U', pos)
+    def powerAndThrust(self, rho=1.225, ):
+        P = np.zeros((self.wf.n_wt))
+        T = np.zeros((self.wf.n_wt))
+        for i_t in range(self.wf.n_wt):
+            # Calculate disc velocity
+            U_d = vel_disc(self.flowdata, 
+                           self.wf.x_wt[i_t], 
+                           self.wf.y_wt[i_t], 
+                           self.wf.z_wt[i_t], 
+                           self.wf.yaws[i_t],
+                           self.wf.D)
             
-            # Calculate wake centre velocity
-            _, V_c = wakeCentre(wcm, V_pr.y, V_pr)
+            # Look up CT and CP
+            CT, CP = NREL5MW(U_d)
             
-            # Calculate std
-            sigma = wakeWidth(wwm, V_pr.y, V_pr)
+            # Calculate thrust force from CT
+            T[i_t] = (np.pi * rho * CT * U_d**2 * self.wf.D**2) / 8
             
-            # Plot profile with label
-            lab = '$x/D = {:d}$'.format(pos)
-            ax.plot(y_to_ys(V_pr.y, V_pr)/sigma, np.abs(V_pr)/V_c, 'o', label=lab)
+            # Calculate power from CP
+            P[i_t] = (np.pi * rho * CP * U_d**3 * self.wf.D**2) / 8
             
-            # Fit Gaussian
-            if wwm == 'Gaussian' or 'integral':
-                amps[ip], mus[ip], sigs[ip], _ = fit_Gaussian(V_pr.y, V_pr/V_c)
-                # amp = np.mean(amps)
-                amp = 1 # pin amplitude at 1
-                mu  = np.mean(mus)
-                sig = np.mean(sigs)
+        return P, T
             
-        # Plot average fitted Gaussian
-        ax.plot(V_pr.y/sig, Gaussian(V_pr.y, 1, 0, sig), c='k', ls='--', label='Gaussian')
-        
-        # Add note with parameters of Gaussian
-        # lab = 'Amplitude = {:d},\n$\overline{{\mu}} = {:.1f}$,\n$\overline{{\sigma_{{y,V}}}} = {:.1f}$'.format(amp, mu, sig)
-        lab = '$\sigma_{{y,V}}|_{{x/D = {:d}}} = {:.0f}$'.format(poss[-1], sigs[-1])
-        if velComp == 'U':
-            lab = '$\sigma_{{y,U}}|_{{x/D = {:d}}} = {:.0f}$'.format(poss[-1], sigs[-1])
-        ax.text(0.02, 0.95, lab, horizontalalignment='left', verticalalignment='top', transform=ax.transAxes)
-            
-        # Add axes limits and labels
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_xlabel('$y^*_V/\sigma_{y,V}$ [-]')
-        ax.set_ylabel('$V/V_c$ [-]')
-        if velComp == 'U':
-            ax.set_xlabel('$y^*_U/\sigma_{y,U}$ [-]')
-            ax.set_ylabel('$(U_\infty - U)/U_c$ [-]')
-        ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$={:.0f}\%$, W.R.$=${:s}'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100, str(self.wf.wrs[0])))
-        
-        # Add legend
-        ax.legend()
-        
-        # Save figure (.pdf and .svg)
-        plt.show()
-        filename = '{:s}_SS_fitGaussian'.format(velComp)
-        figpath  = 'fig/yaw/' + str(self.wf.yaws[0]) + '/'
-        if not os.path.exists(figpath): # if the directory doesn't exist create it
-            os.makedirs(figpath)
-        fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-        fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
-        
-        return amp, mu, sig
-    
-    def plot_wakeCentreAndEdges(self, poss, wcm, wwm, xlim=None, ylim=None, FigureSize=None):
-        # Create lists for wake centres and wake widths
-        wc_U = np.empty((len(poss)))
-        wc_V = np.empty((len(poss)))
-        ww_U = np.empty((len(poss)))
-        ww_V = np.empty((len(poss)))
-        
-        for i, pos in enumerate(poss):
-            # Extract profiles
-            U_pr = self.velocityProfile('U', pos)
-            V_pr = self.velocityProfile('V', pos)
-            
-            # Find wake centres
-            wc_U[i], _ = wakeCentre(wcm, U_pr.y, U_pr)
-            wc_V[i], _ = wakeCentre(wcm, V_pr.y, V_pr)
-            
-            # Find wake width and append to lists
-            ww_U[i] = wakeWidth(wwm, U_pr.y, U_pr)
-            ww_V[i] = wakeWidth(wwm, V_pr.y, V_pr)
-            
-        # Create subplots object
-        fig, ax = plt.subplots(1, 1, figsize=FigureSize)
-        
-        # Add line at y=0
-        y0_line = ax.axhline(y=0, xmin=0, xmax=1, ls=':', c='k', label='$y=0$')
-        
-        # Plot wake centrelines
-        l1, = ax.plot(poss, wc_U/self.wf.D, ls='-', label='$U$')
-        l2, = ax.plot(poss, wc_V/self.wf.D, ls='-', label='$V$')
-        vel_handles = [l1, l2]
-        
-        # Plot wake edges
-        ax.plot(poss, (wc_U+ww_U)/self.wf.D, ls='--', c=list(mcolours)[0])
-        ax.plot(poss, (wc_U-ww_U)/self.wf.D, ls='--', c=list(mcolours)[0])
-        ax.plot(poss, (wc_V+ww_V)/self.wf.D, ls='--', c=list(mcolours)[1])
-        ax.plot(poss, (wc_V-ww_V)/self.wf.D, ls='--', c=list(mcolours)[1])
-        
-        # Draw actuator disc
-        draw_AD(ax, 'top', self.wf.x_AD[0], self.wf.y_AD[0], self.wf.D/self.wf.D, self.wf.yaws[0])
-        
-        # Create legend entries for line styles
-        centreline  = mlines.Line2D([], [], color='black', ls='-', label='Centreline')
-        edges = mlines.Line2D([], [], color='black', ls='--', label='Edges')
-        
-        # Add legends
-        vel_legend = plt.legend(handles=vel_handles, loc='upper left')
-        plt.gca().add_artist(vel_legend)
-        ax.legend(handles=[centreline, edges, y0_line], loc='lower left')
-        
-        # Add axes labels and limits
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_title('$\gamma = {:d}^\circ$, $C_T = {:.1f}$, T.I.$= {:.0f}\%$'.format(self.wf.yaws[0], self.wf.CTs[0], self.wf.ti*100))
-        ax.set_xlabel('$x/D$ [-]')
-        ax.set_ylabel('$y/D$ [-]')
-        
-        # Save figure (.pdf and .svg)
-        plt.show()
-        filename = 'wakeCentreAndEdges'
-        figpath  = 'fig/yaw/' + str(self.wf.yaws[0]) + '/'
-        if not os.path.exists(figpath): # if the directory doesn't exist create it
-            os.makedirs(figpath)
-        fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-        fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
-        
-class flowcaseGroup():
-    def __init__(self, var, vals, path, wf, flowcases=None):
-        if flowcases is not None:
-            self.flowcases = flowcases
-        
-        # Load flowdata for all cases in group
-        self.load_flowdata(var, vals, path, wf)
-    
-    def load_flowdata(self, var, vals, path, wf_template):
-        self.var  = var  # variable: 'yaw', 'ct', 'ti', or 'wr'
-        self.vals = vals # values of variable
-        self.path = path # path to data directories
-        
-        self.flowcases = []
-        for i, val in enumerate(vals):
-            wf = copy.copy(wf_template)
-            wf.wts = copy.copy(wf_template.wts)
-            infile = path + var + '/' + str(val) + '/flowdata.nc'
-            self.flowcases.append(flowcase(infile, wf))
-            if self.var == 'yaw':
-                self.flowcases[i].wf.yaws = [val]
-            if self.var == 'ct':
-                self.flowcases[i].wf.CTs = [val]
-            if self.var == 'ti':
-                self.flowcases[i].wf.ti = val
-            if self.var == 'nwr':
-                self.flowcases[i].wf.wrs  = [False]
-                self.flowcases[i].wf.yaws = [val]
-                self.flowcases[i].load_flowdata()
-            self.flowcases[i].load_flowdata()
-            
-    def plot_VvelocityProfiles(self, pos, xlim=None, ylim=None, FigureSize=None):
-        # Create labels
-        varlabels = {
-            'yaw':['$\gamma$','$^\circ$'],
-            'ct':['$C_T$',''],
-            'ti':['T.I.',''],
-            'nwr':['$\gamma$','$^\circ$']
-            }
-        
-        # Create subplots object
-        fig, ax = plt.subplots(1, 1, figsize=FigureSize)
-        
-        for i, flowcase in enumerate(self.flowcases):
-            # Extract profile
-            V_pr = flowcase.velocityProfile('V', pos)
-            
-            # Plot profile with label
-            lab = varlabels.get(self.var)[0] + '$= ' + str(self.vals[i]) + '$' + varlabels.get(self.var)[1]
-            ax.plot(V_pr.y/flowcase.wf.D, V_pr, label=lab)
-        
-        # Add axes limits and labels
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_xlabel('$y/D$ [-]')
-        ax.set_ylabel('$V$ [m/s]')
-        
-        # Add plot title
-        titles = {
-            'yaw' : r'$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.CTs[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0])),
-            'ct'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0])),
-            'ti'  : r'$x/D = {:d}$, $\gamma = {:d}^\circ$, $C_T = {:.1f}$, W.R.$=${:s}'.format(pos, flowcase.wf.yaws[0], flowcase.wf.CTs[0], str(flowcase.wf.wrs[0])),
-            'nwr' : r'$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%, W.R.$=${:s}'.format(pos, flowcase.wf.CTs[0], flowcase.wf.ti*100, str(flowcase.wf.wrs[0]))
-            }
-        ax.set_title(titles.get(self.var))
-        
-        # Add legend
-        ax.legend()
-        
-        # Save figure (.pdf and .svg)
-        fig.tight_layout()
-        plt.show()
-        filename = 'VvelocityProfiles_{:s}'.format(self.var)
-        figpath  = 'fig/' + self.var + '/'
-        if not os.path.exists(figpath): # if the directory doesn't exist create it
-            os.makedirs(figpath)
-        fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-        fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
-        
-    def plot_LSS(self, poss, wcm, wwm, xlim=None, ylim=None, FigureSize=None):
-        # Create subplots object
-        fig, axs = plt.subplots(2, 2, figsize=FigureSize, sharex=True, sharey=True)
-        
-        # Make axes indexing 1D
-        axs = np.ravel(axs)
-        
-        for i, flowcase in enumerate(self.flowcases):
-            for ip, pos in enumerate(poss):
-                # Extract profile
-                V_pr = flowcase.velocityProfile('V', pos)
-                
-                # Calculate wake centre velocity
-                _, V_c = wakeCentre(wcm, V_pr.y, V_pr)
-                
-                # Calculate wake width
-                sigma = wakeWidth(wwm, V_pr.y, V_pr)
-                
-                # Plot profile with label
-                lab = '$x/D = {:d}$'.format(pos)
-                if flowcase.wf.yaws[0] == 0:
-                    axs[i].plot(V_pr.y/sigma, V_pr, label=lab)
-                else:
-                    axs[i].plot(y_to_ys(V_pr.y, V_pr)/sigma, V_pr/V_c, label=lab)
-            
-            # Add axes limits and labels
-            axs[i].set_xlim(xlim)
-            axs[i].set_ylim(ylim)
-            if i > 1:
-                axs[i].set_xlabel('$y^*_V/\sigma_{y,V}$')
-            if i%2 == 0:
-                axs[i].set_ylabel('$V/V_c$ [-]')
-            titles = {
-                'yaw' : r'$\gamma = {:d}^\circ$'.format(flowcase.wf.yaws[0]),
-                'ct'  : r'$C_T = {:.1f}$'.format(flowcase.wf.CTs[0]),
-                'ti'  : r'T.I.$={:.0f}\%$'.format(flowcase.wf.ti*100)
-                }
-            suptitles = {
-                'yaw' : r'$C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(flowcase.wf.CTs[0], flowcase.wf.ti*100),
-                'ct' : r'$\gamma = {:d}^\circ$, T.I.$= {:.0f}$%'.format(flowcase.wf.yaws[0], flowcase.wf.ti*100),
-                'ti' : r'$\gamma = {:d}^\circ$, $C_T = {:.1f}$'.format(flowcase.wf.yaws[0], flowcase.wf.CTs[0])
-                }
-            axs[i].set_title(titles.get(self.var))
-            fig.suptitle(suptitles.get(self.var))
-        
-        # Add legend
-        plt.legend(loc='center left', bbox_to_anchor=(1.025,1.1))
-        
-        # Save figure (.pdf and .svg)
-        # fig.tight_layout()
-        plt.show()
-        filename = 'LSS'
-        figpath  = 'fig/' + self.var + '/'
-        if not os.path.exists(figpath): # if the directory doesn't exist create it
-            os.makedirs(figpath)
-        fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-        fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
-    
-def plot_VvelocityProfiles_wr(wr, nwr, pos, xlim=None, ylim=None, FigureSize=None):
-    # Create subplots object
-    fig, ax = plt.subplots(1, 1, figsize=FigureSize)
-    
-    # Group two flowcaseGroups
-    c = [wr.flowcases, nwr.flowcases]
-    
-    # Create empty list for legend handles
-    wr_plot = []
-    
-    for i in range(np.shape(c)[1]):
-        # Extract profiles
-        V_pr_wr  = c[0][i].velocityProfile('V', pos)
-        V_pr_nwr = c[1][i].velocityProfile('V', pos)
-        
-        # Plot profile with label
-        lab = '$\gamma = $' + str(c[0][i].wf.yaws[0]) + '$^\circ$'
-        l1, = ax.plot(V_pr_wr.y/c[0][i].wf.D, V_pr_wr, label=lab, ls='-', c=list(mcolours)[i])
-        wr_plot.append(l1)
-        ax.plot(V_pr_nwr.y/c[1][i].wf.D, V_pr_nwr, ls='--', c=list(mcolours)[i])
-    
-    # Create legend entries for line styles
-    solid_line = mlines.Line2D([], [], color='black', ls='-', label='On')
-    dashed_line = mlines.Line2D([], [], color='black', ls='--', label='Off')
-    
-    # Add axes limits and labels
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
-    ax.set_xlabel('$y/D$ [-]')
-    ax.set_ylabel('$V$ [m/s]')
-    ax.set_title('$x/D = {:d}$, $C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(pos, c[0][i].wf.CTs[0], c[0][i].wf.ti*100))
-    
-    # Add legends
-    yaw_legend = plt.legend(handles=wr_plot, loc='upper left')
-    plt.gca().add_artist(yaw_legend)
-    ax.legend(handles=[solid_line, dashed_line], loc = 'upper right', title='Wake rotation')
-    
-    # Save figure (.pdf and .svg)
-    # fig.tight_layout()
-    plt.show()
-    filename = 'VvelocityProfile'
-    figpath  = 'fig/wr/'
-    if not os.path.exists(figpath): # if the directory doesn't exist create it
-        os.makedirs(figpath)
-    fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-    fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
-    
-def plot_LSS_wr(wr, nwr, poss, wcm, wwm, xlim=None, ylim=None, FigureSize=None):
-    # Create subplots object
-    fig, axs = plt.subplots(2, 2, figsize=FigureSize, sharex=True, sharey=True)
-    
-    # Make axes indexing 1D
-    axs = np.ravel(axs)
-    
-    # Group two flowcaseGroups
-    c = [wr.flowcases, nwr.flowcases]
-    
-    for i in range(np.shape(c)[1]):
-        # Create empty list for legend handles
-        wr_plot = []
-        
-        for ip, pos in enumerate(poss):
-            # Extract profiles
-            V_pr_wr  = c[0][i].velocityProfile('V', pos)
-            V_pr_nwr = c[1][i].velocityProfile('V', pos)
-            
-            # Calculate wake centre velocities
-            _, V_c_wr  = wakeCentre(wcm, V_pr_wr.y, V_pr_wr)
-            _, V_c_nwr = wakeCentre(wcm, V_pr_nwr.y, V_pr_nwr)
-            
-            # Calculate wake widths
-            sigma_wr   = wakeWidth(wwm, V_pr_wr.y, V_pr_wr)
-            sigma_nwr  = wakeWidth(wwm, V_pr_nwr.y, V_pr_nwr)
-            
-            # Plot profiles with labels
-            lab = '$x/D = {:d}$'.format(pos)
-            if c[0][i].wf.yaws[0] == 0: # if yaw = 0 deg,  use y-coords
-                l1, = axs[i].plot(V_pr_wr.y/sigma_wr, V_pr_wr/V_c_wr, label=lab, ls='-', c=list(mcolours)[ip])
-                wr_plot.append(l1)
-                axs[i].plot(V_pr_nwr.y/sigma_nwr, V_pr_nwr/V_c_nwr, ls='--', c=list(mcolours)[ip])
-            else: # use y*
-                l1, = axs[i].plot(y_to_ys(V_pr_wr.y, V_pr_wr)/sigma_wr, V_pr_wr/V_c_wr, label=lab, ls='-', c=list(mcolours)[ip])
-                wr_plot.append(l1)
-                axs[i].plot(y_to_ys(V_pr_nwr.y, V_pr_nwr)/sigma_nwr, V_pr_nwr/V_c_nwr, ls='--', c=list(mcolours)[ip])
-        
-        # Add axes limits and labels
-        axs[i].set_xlim(xlim)
-        axs[i].set_ylim(ylim)
-        if i > 1:
-            if c[0][i].wf.yaws[0] == 0:
-                axs[i].set_xlabel('$y/\sigma_{y,V}$')
-            else:
-                axs[i].set_xlabel('$y^*_V/\sigma_{y,V}$')
-        if i%2 == 0:
-            axs[i].set_ylabel('$V/V_c$ [-]')
-        axs[i].set_title(r'$\gamma = {:d}^\circ$'.format(c[0][i].wf.yaws[0]))
-        fig.suptitle(r'$C_T = {:.1f}$, T.I.$= {:.0f}$%'.format(c[0][i].wf.CTs[0], c[0][i].wf.ti*100))
-    
-    # Create legend entries for line styles
-    solid_line = mlines.Line2D([], [], color='black', ls='-', label='On')
-    dashed_line = mlines.Line2D([], [], color='black', ls='--', label='Off')    
-    
-    # Add legends
-    yaw_legend = plt.legend(handles=wr_plot, loc='center left', bbox_to_anchor=(1.025,1.7))
-    plt.gca().add_artist(yaw_legend)
-    axs[i].legend(handles=[solid_line, dashed_line], loc = 'center left', bbox_to_anchor=(1.025, 0.5), title='Wake rotation')
-    
-    # Save figure (.pdf and .svg)
-    # fig.tight_layout()
-    plt.show()
-    filename = 'LSS'
-    figpath  = 'fig/wr/'
-    if not os.path.exists(figpath): # if the directory doesn't exist create it
-        os.makedirs(figpath)
-    fig.savefig(figpath + filename + '.pdf', bbox_inches='tight')
-    fig.savefig(figpath + filename + '.svg', bbox_inches='tight')
+def get_PWE_coords(x_wt, y_wt):
+    x_AD = x_wt - np.ptp(x_wt)/2
+    y_AD = y_wt - np.ptp(y_wt)/2
+    return x_AD, y_AD
             
 def draw_AD(ax,view,x,y,D,yaw):
     '''
-    Draw an actuator disc (AD) at (x,y) rotated yaw degrees anticlockwise about its centre.
+    Draw an actuator disc (AD) at (x,y) rotated yaw radians anticlockwise about its centre.
 
     Parameters
     ----------
@@ -634,7 +362,7 @@ def draw_AD(ax,view,x,y,D,yaw):
     D : float
         Diameter of AD - units should match that of plot.
     theta : float
-        Rotation of AD in degrees. 
+        Rotation of AD in radians. 
 
     Returns
     -------
@@ -642,7 +370,6 @@ def draw_AD(ax,view,x,y,D,yaw):
 
     '''
     R = D/2
-    yaw = yaw*np.pi/180
     if view == 'top':
         # Upper point of rotor
         x1 = np.sin(yaw)*R
@@ -653,11 +380,17 @@ def draw_AD(ax,view,x,y,D,yaw):
         # Plot
         ax.plot([x+x1,x+x2],[y+y1,y+y2],'k')
     if view == 'front':
-        xp = np.linspace(x-R,x+R,100)
-        yp = y + np.sqrt(R**2 - xp**2)
-        ax.plot(xp,yp,'k')
+        theta = np.linspace(0, 2*np.pi, 100)
+        a = R*np.cos(yaw)*np.cos(theta)
+        b = R*np.sin(theta)
+        ax.plot(x+a,y+b,'k')
+    if view == 'side':
+        theta = np.linspace(0, 2*np.pi, 100)
+        a = R*np.sin(yaw)*np.cos(theta)
+        b = R*np.sin(theta)
+        ax.plot(x+a,y+b,'k')
     
-def y_to_ys(y,vel):
+def y_to_ys(y,vel,method):
     '''
     
 
@@ -680,10 +413,10 @@ def y_to_ys(y,vel):
     vel = np.array(vel)
     
     # Find wake centre
-    idx = np.nanargmax(np.abs(vel)) # peak
-    # idx = wakeCentre(y, vel)
+    # idx = np.nanargmax(np.abs(vel)) # peak
+    y_c, _ = wakeCentre(method, y, vel)
     
-    ys  = y - y[idx]
+    ys  = y - y_c
     
     return ys
 
@@ -703,6 +436,21 @@ def wakeCentre(method, y, vel):
     if method == 'Gaussian':
         # fit a Gaussian and use mean as index
         vel_c, y_c, _, _ = fit_Gaussian(y, vel)
+    if method == 'unyawed':
+        vel_c = 0
+        
+        idx_max = np.argmax(vel)
+        idx_min = np.argmin(vel)
+
+        if np.argmax(vel) < np.argmin(vel):
+            vel = vel[idx_max:idx_min]
+            y = y[idx_max:idx_min]
+        else:
+            vel = vel[idx_min:idx_max]
+            y = y[idx_min:idx_max]
+
+        y_c = np.interp(vel_c, y, vel)        
+        
     return y_c, vel_c
 
 def wakeWidth(method, y, vel):
@@ -760,7 +508,7 @@ def integral(y,vel):
     vel_max, _, _, _ = fit_Gaussian(y, vel)
     
     # Calculate wake width
-    sigma = 1/(np.sqrt(2*np.pi)*vel_max) * spi.simps(vel,y)
+    sigma = 1/(np.sqrt(2*np.pi)*vel_max) * spi.simps(np.abs(vel),y)
     
     return sigma
 
@@ -769,3 +517,39 @@ def Gaussian(x, amp, mu, sigma):
 
 # def Gaussian(x, mu, sigma):
     # return (1/(sigma * np.sqrt(2*np.pi))) * np.exp(-(x - mu)**2 / (2 * sigma**2))
+
+def set_size(width, fraction=1, height_adjust=1):
+    """Set figure dimensions to avoid scaling in LaTeX.
+
+    Parameters
+    ----------
+    width: float
+            Document textwidth or columnwidth in pts
+    fraction: float, optional
+            Fraction of the width which you wish the figure to occupy
+
+    Returns
+    -------
+    fig_dim: tuple
+            Dimensions of figure in inches
+    """
+    # Width of figure (in pts)
+    fig_width_pt = width * fraction
+
+    # Convert from pt to inches
+    inches_per_pt = 1 / 72.27
+
+    # Golden ratio to set aesthetic figure height
+    # https://disq.us/p/2940ij3
+    golden_ratio = (5**.5 - 1) / 2
+
+    # Figure width in inches
+    fig_width_in = fig_width_pt * inches_per_pt
+    # Figure height in inches
+    fig_height_in = fig_width_in * golden_ratio
+    # Adjust figure height
+    fig_height_in = fig_height_in * height_adjust
+
+    fig_dim = (fig_width_in, fig_height_in)
+
+    return fig_dim

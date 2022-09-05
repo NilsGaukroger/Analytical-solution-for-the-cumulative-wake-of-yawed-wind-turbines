@@ -56,7 +56,7 @@ x_wd = np.array([-12*D, 20*D]) # wake domain x-limits
 y_wd = np.array([-4*D, 4*D]) # wake domain y-limits
 
 #%% Import relevant data using xarray
-os.chdir(r'C:\Users\nilsg\OneDrive\Documents\EWEM\Thesis\PyWakeEllipSys\JFM') # change to correct directory
+os.chdir(r'C:\Users\nilsg\OneDrive\Documents\EWEM\Thesis\NUMERICAL\PyWakeEllipSys\JFM\data') # change to correct directory
 
 infile = alignment + '/flowdata.nc'
 flowdata = xarray.open_dataset(infile)

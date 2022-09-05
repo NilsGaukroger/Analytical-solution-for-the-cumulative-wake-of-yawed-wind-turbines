@@ -2,11 +2,13 @@
 *data/
 *fig/
 scripts_to_nils/
+flowdata/
+gridstudy/
 
 ##--------------------------------------
 
 # Byte-compiled / optimized / DLL files
-__pycache__/
+*__pycache__/
 *.py[cod]
 *$py.class
 
