@@ -125,7 +125,7 @@ wf_template = windFarm(Uinf=8,
 yaws = [0,25]
 
 # Resolutions studied (per yaw angle)
-cDs = [[4,8,16,32],
+cDs = [[4,8,16],
        [4,8,16]]
 
 # Create discretisation for downstream plotting

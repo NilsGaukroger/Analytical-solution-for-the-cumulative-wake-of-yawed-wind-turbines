@@ -78,7 +78,7 @@ class windFarm():
         self.z_AD = self.zh * np.ones(np.shape(self.x_AD))
     
 class flowcase():
-    def __init__(self, dir_path, wf, cD):
+    def __init__(self, dir_path, wf, cD, shift=True):
         self.dir_path = dir_path # flowdata.nc directory path
         self.wf       = wf       # wf instance of flowcase
         self.cD       = cD       # cells per diameter
@@ -86,7 +86,7 @@ class flowcase():
         # Load flow data upon initialisation
         self.load_flowdata()
         self.load_flowdata_remove()
-        self.flowdata_diff()
+        self.flowdata_diff(shift=shift)
     
     def load_flowdata(self):
         # Load full 3D flow data as xarray.Dataset
@@ -108,7 +108,7 @@ class flowcase():
             if os.path.exists(dir_path):
                 self.flowdata_remove[i_wt] = xarray.open_dataset(dir_path + '/flowdata.nc')
     
-    def flowdata_diff(self):
+    def flowdata_diff(self, shift):
         self.flowdata_diff = [0] * self.wf.n_wt
         self.Udef          = [0] * self.wf.n_wt
         self.Udef_zh       = [0] * self.wf.n_wt
@@ -116,17 +116,18 @@ class flowcase():
         self.Vdef_zh       = [0] * self.wf.n_wt
         for i_wt in range(self.wf.n_wt):
             if self.flowdata_remove[i_wt] != 0:
-                # Shift flowdata.variables such that first turbine is at x = 0
-                # Create x_wt_r and y_wt_r and then calculate the shift required to convert them to x_AD_r and y_AD_r then shift by this amount
-                x_wt_r = np.delete(self.wf.x_wt, i_wt)
-                y_wt_r = np.delete(self.wf.y_wt, i_wt)
-                
-                # Calculate difference between original wf centre and wf centre with turbine removed
-                x_shift = (np.ptp(x_wt_r) - np.ptp(self.wf.x_wt)) / 2
-                y_shift = (np.ptp(y_wt_r) - np.ptp(self.wf.y_wt)) / 2
-                
-                # Shift flowdata
-                self.flowdata_remove[i_wt] = self.flowdata_remove[i_wt].shift(x = int(x_shift*self.cD), y = int(y_shift*self.cD))
+                if shift:
+                    # Shift flowdata.variables such that first turbine is at x = 0
+                    # Create x_wt_r and y_wt_r and then calculate the shift required to convert them to x_AD_r and y_AD_r then shift by this amount
+                    x_wt_r = np.delete(self.wf.x_wt, i_wt)
+                    y_wt_r = np.delete(self.wf.y_wt, i_wt)
+                    
+                    # Calculate difference between original wf centre and wf centre with turbine removed
+                    x_shift = (np.ptp(x_wt_r) - np.ptp(self.wf.x_wt)) / 2
+                    y_shift = (np.ptp(y_wt_r) - np.ptp(self.wf.y_wt)) / 2
+                    
+                    # Shift flowdata
+                    self.flowdata_remove[i_wt] = self.flowdata_remove[i_wt].shift(x = int(x_shift*self.cD), y = int(y_shift*self.cD))
                 
                 # Calculate deficits
                 self.flowdata_diff[i_wt] = self.flowdata_remove[i_wt] - self.flowdata
@@ -153,7 +154,7 @@ class flowcase():
                 }
         return profiles.get(velComp)
     
-    def analytical_solution(self, method, removes = [], U_h=None, V_h=0, rho=1.225):
+    def analytical_solution(self, method, near_wake_correction, removes = [], U_h=None, V_h=0, rho=1.225):
         '''
         Computes streamwise and lateral velocity fields for flowcase using analytical solution.
 
@@ -214,7 +215,7 @@ class flowcase():
 
         ## Run solution
         start_time = time.time() # start timer
-        flowdata, P = lateralSolution(method, self.wf.n_wt, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, rho, self.wf.zh, self.wf.D)
+        flowdata, P = lateralSolution(method, self.wf.n_wt, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, near_wake_correction, rho, self.wf.zh, self.wf.D)
         for i_t in removes:
             # remove turbine from layout
             x_t_r = np.delete(self.wf.x_wt, i_t)
@@ -223,7 +224,7 @@ class flowcase():
             # remove value from yaws
             yaws_r = np.delete(yaws, i_t)
             # run solution
-            flowdata_remove[i_t], _ = lateralSolution(method, self.wf.n_wt-1, x_t_r, y_t_r, z_t_r, yaws_r, x, y, z, U0, U_h, V0, I0, rho, self.wf.zh, self.wf.D)
+            flowdata_remove[i_t], _ = lateralSolution(method, self.wf.n_wt-1, x_t_r, y_t_r, z_t_r, yaws_r, x, y, z, U0, U_h, V0, I0, near_wake_correction, rho, self.wf.zh, self.wf.D)
         end_time = time.time() # end timer
         
         ## Calculate deficits
@@ -319,28 +320,31 @@ class flowcase():
         
         return flowdata, flowdata_def, P, U_h
     
-    def powerAndThrust(self, rho=1.225, ):
+    def powerAndThrust(self, rho=1.225):
         P = np.zeros((self.wf.n_wt))
         T = np.zeros((self.wf.n_wt))
+        U_d = np.zeros((self.wf.n_wt))
         for i_t in range(self.wf.n_wt):
             # Calculate disc velocity
-            U_d = vel_disc(self.flowdata, 
-                           self.wf.x_wt[i_t], 
-                           self.wf.y_wt[i_t], 
+            U_d[i_t] = vel_disc(self.flowdata, 
+                           self.wf.x_wt[i_t]*self.wf.D, 
+                           self.wf.y_wt[i_t]*self.wf.D, 
                            self.wf.z_wt[i_t], 
                            self.wf.yaws[i_t],
                            self.wf.D)
             
+            ###### CORRECTION HERE FOR SOME ERROR WITH U_d THAT I DON'T HAVE TIME TO FIX BEFORE THE HAND-IN ########
+            
             # Look up CT and CP
-            CT, CP = NREL5MW(U_d)
+            CT, CP = NREL5MW(U_d[i_t])
             
             # Calculate thrust force from CT
-            T[i_t] = (np.pi * rho * CT * U_d**2 * self.wf.D**2) / 8
+            T[i_t] = (np.pi * rho * CT * U_d[i_t]**2 * self.wf.D**2) / 8
             
             # Calculate power from CP
-            P[i_t] = (np.pi * rho * CP * U_d**3 * self.wf.D**2) / 8
+            P[i_t] = (np.pi * rho * CP * U_d[i_t]**3 * self.wf.D**2) / 8
             
-        return P, T
+        return U_d, T
             
 def get_PWE_coords(x_wt, y_wt):
     x_AD = x_wt - np.ptp(x_wt)/2

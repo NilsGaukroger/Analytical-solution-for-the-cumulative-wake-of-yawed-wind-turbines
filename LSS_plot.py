@@ -36,7 +36,7 @@ wf_template = windFarm(Uinf=8,
               x_wt=[0],
               y_wt=[0],
               wts=[NREL5MW],
-              yaws=[25],
+              yaws=np.deg2rad([25]),
               CTs=[0.8],
               wrs=[True])
 
@@ -53,7 +53,7 @@ wf_aligned = windFarm(Uinf=8,
                              8,  0,  4,
                              8,  0,  4],
                       wts=[NREL5MW]*15,
-                      yaws=[25]*15,
+                      yaws=np.deg2rad([25]*15),
                       CTs=[0.8]*15,
                       wrs=[True]*15)
 
@@ -70,7 +70,7 @@ wf_slanted = windFarm(Uinf=8,
                             10.25,  2.25,  6.25,
                             11.00,  3.00,  7.00],
                       wts=[NREL5MW]*15,
-                      yaws=[25]*15,
+                      yaws=np.deg2rad([25]*15),
                       CTs=[0.8]*15,
                       wrs=[True]*15)
 
@@ -224,7 +224,7 @@ for ip, x_D in enumerate(x_Ds):
     axbig.vlines(x_D, ylims[0], ylims[1], color='k', ls='-.')
     
     # Extract profile velocities
-    V_pr = yaw25.velocityProfile('V', x_D)
+    V_pr = yaw25.velocityProfile('V', x_D, WT=0)
     
     # Plot profiles
     # axs[1,ip].scatter(V_pr,
@@ -339,7 +339,7 @@ for ip, x_D in enumerate(x_Ds):
     axbig.vlines(x_D, ylims[0], ylims[1], color='k', ls='-.')
     
     # Extract profile velocities
-    V_pr = yaw0.velocityProfile('V', x_D)
+    V_pr = yaw0.velocityProfile('V', x_D, WT=0)
     
     # Plot profiles
     # axs[1,ip].plot(V_pr,
@@ -472,7 +472,7 @@ plt.show()
     
 #%% Effect of yaw angle
 # Fraction of textwidth
-fraction = 1
+fraction = 0.9
 
 # Downstream position
 x_D = 6
@@ -492,7 +492,7 @@ fig, ax = plt.subplots(1,1,
 
 for i, fc in enumerate(fc_yaws):
     # Extract profile
-    V_pr = fc.velocityProfile('V', x_D)
+    V_pr = fc.velocityProfile('V', x_D, WT=0)
     
     # Plot profile with label
     # ax.scatter(V_pr.y/fc.wf.D, V_pr/8, label='$' + str(fc.wf.yaws[0]) + '^\circ$', color=colours(i), marker=markers[i])
@@ -534,7 +534,7 @@ fig, ax = plt.subplots(1,1,
 
 for i, fc in enumerate(fc_CTs):
     # Extract profile
-    V_pr = fc.velocityProfile('V', x_D)
+    V_pr = fc.velocityProfile('V', x_D, WT=0)
     
     # Plot profile with label
     # ax.scatter(V_pr.y/fc.wf.D, V_pr, label='$' + str(fc.wf.CTs[0]) + '$', color=colours(i), marker=markers[i])
@@ -576,7 +576,7 @@ fig, ax = plt.subplots(1,1,
 
 for i, fc in enumerate(fc_CTs):
     # Extract profile
-    V_pr = fc.velocityProfile('V', x_D)
+    V_pr = fc.velocityProfile('V', x_D, WT=0)
     
     # Plot profile with label
     # ax.scatter(V_pr.y/fc.wf.D, V_pr/(8*fc.wf.CTs[0]), label='$' + str(fc.wf.CTs[0]) + '$', color=colours(i), marker=markers[i])
@@ -618,7 +618,7 @@ fig, ax = plt.subplots(1,1,
 
 for i, fc in enumerate(fc_TIs):
     # Extract profile
-    V_pr = fc.velocityProfile('V', x_D)
+    V_pr = fc.velocityProfile('V', x_D, WT=0)
     
     # Plot profile with label
     # ax.scatter(V_pr.y/fc.wf.D, V_pr/8, label='$' + '{:.2f}'.format(fc.wf.ti) + '$', color=colours(i), marker=markers[i])
@@ -663,8 +663,8 @@ wr_plot = []
 
 for iy in range(len(yaws[:-4])):
     # Extract profiles
-    V_pr_wr  = fc_yaws[iy].velocityProfile('V', x_D)
-    V_pr_nwr = fc_yaws_nwr[iy].velocityProfile('V', x_D)
+    V_pr_wr  = fc_yaws[iy].velocityProfile('V', x_D, WT=0)
+    V_pr_nwr = fc_yaws_nwr[iy].velocityProfile('V', x_D, WT=0)
     
     # Plot profiles with labels
     l1, = ax.plot(V_pr_wr.y/fc.wf.D, 
@@ -744,7 +744,7 @@ axs = np.ravel(axs)
 for iy, fc in enumerate(reversed(fc_yaws[1:5])):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        V_pr = fc.velocityProfile('V', x_D)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centre velocity
         if fc.wf.yaws[0] > 0:
@@ -824,7 +824,7 @@ axs = np.ravel(axs)
 for iy, fc in enumerate(reversed(fc_CTs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        V_pr = fc.velocityProfile('V', x_D)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centre velocity
         if fc.wf.yaws[0] > 0:
@@ -870,7 +870,7 @@ plt.show()
 
 #%% Self-similarity: effect of thrust coefficient: one figure
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake centre and width methods
 wcm = 'max'; wwm = 'integral'
@@ -898,7 +898,7 @@ for iy, fc in enumerate(reversed(fc_CTs)):
     handles = []
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        V_pr = fc.velocityProfile('V', x_D)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centre velocity
         if fc.wf.yaws[0] > 0:
@@ -967,7 +967,7 @@ axs = np.ravel(axs)
 for iy, fc in enumerate(reversed(fc_TIs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        V_pr = fc.velocityProfile('V', x_D)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centre velocity
         if fc.wf.yaws[0] > 0:
@@ -1013,7 +1013,7 @@ plt.show()
 
 #%% Self-similarity: effect of turbulence intensity: one figure
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake centre and width methods
 wcm = 'max'; wwm = 'integral'
@@ -1041,7 +1041,7 @@ for iy, fc in enumerate(reversed(fc_TIs)):
     handles = []
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        V_pr = fc.velocityProfile('V', x_D)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centre velocity
         if fc.wf.yaws[0] > 0:
@@ -1111,7 +1111,7 @@ for iy, fc in enumerate(reversed(fc_yaws[1:5])):
     
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
         
         # Calculate wake centre velocity
         _, U_c = pu.wakeCentre(wcm, U_pr.y, U_pr)
@@ -1188,7 +1188,7 @@ for iy, fc in enumerate(reversed(fc_yaws[1:5])):
     
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        V_pr = fc.velocityProfile('V', x_D)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centre velocity
         if fc.wf.yaws[0] > 0:
@@ -1265,7 +1265,7 @@ subplot_labels = ['a)', 'b)', 'c)']
 
 # Create subplots object
 fig, axs = plt.subplots(1,3,
-                        figsize=set_size(textwidth, fraction), sharey=True)
+                        figsize=set_size(textwidth, fraction, height_adjust=0.8), sharey=True)
 
 sigmas = np.empty((4,len(x_Ds)))
 for iy, fc in enumerate(fc_SS):
@@ -1322,7 +1322,7 @@ plt.show()
 
 #%% Wake width: Effect of yaw angle
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake width methods
 wwm = 'integral'
@@ -1351,8 +1351,8 @@ lines = []
 for iy, fc in enumerate(reversed(fc_yaws[0:5])):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake widths
         sigmas_u[iy,ip] = pu.wakeWidth(wwm, U_pr.y, U_pr)
@@ -1398,7 +1398,7 @@ plt.show()
 
 #%% Wake width: Effect of yaw angle: long domain
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake width methods
 wwm = 'integral'
@@ -1427,8 +1427,8 @@ lines = []
 for iy, fc in enumerate(reversed(fc_yaws_LD)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake widths
         sigmas_u[iy,ip] = pu.wakeWidth(wwm, U_pr.y, U_pr)
@@ -1474,7 +1474,7 @@ plt.show()
 
 #%% Wake width: Effect of thrust coefficient
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake width methods
 wwm = 'integral'
@@ -1503,8 +1503,8 @@ sigmas_v = np.empty((len(CTs),len(x_Ds)))
 for iy, fc in enumerate(reversed(fc_CTs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake widths
         sigmas_u[iy,ip] = pu.wakeWidth(wwm, U_pr.y, U_pr)
@@ -1549,7 +1549,7 @@ plt.show()
 
 #%% Wake width: Effect of turbulence intensity: lateral
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake width methods
 wwm = 'integral'
@@ -1581,8 +1581,8 @@ lines = []
 for iy, fc in enumerate(reversed(fc_TIs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake widths
         sigmas_u[iy,ip] = pu.wakeWidth(wwm, U_pr.y, U_pr)
@@ -1627,7 +1627,7 @@ plt.show()
 
 #%% Wake width: Effect of turbulence intensity: lateral: normalised
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake width methods
 wwm = 'integral'
@@ -1660,8 +1660,8 @@ sigmas_v = np.empty((len(TIs),len(x_Ds)))
 for iy, fc in enumerate(reversed(fc_TIs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        # U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        # U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake widths
         # sigmas_u[iy,ip] = pu.wakeWidth(wwm, U_pr.y, U_pr)
@@ -1686,7 +1686,7 @@ plt.show()
 
 #%% Wake centre: effect of yaw angle
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake centre methods
 wcm = 'Gaussian'
@@ -1710,8 +1710,8 @@ lines = []
 for iy, fc in enumerate(reversed(fc_yaws[1:5])):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centres
         centres_u[iy,ip], _ = pu.wakeCentre(wcm, U_pr.y, U_pr)
@@ -1758,7 +1758,7 @@ plt.show()
 
 #%% Wake centre: effect of thrust coefficient
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake centre methods
 wcm = 'Gaussian'
@@ -1785,8 +1785,8 @@ lines = []
 for iy, fc in enumerate(reversed(fc_CTs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centres
         centres_u[iy,ip], _ = pu.wakeCentre(wcm, U_pr.y, U_pr)
@@ -1830,7 +1830,7 @@ plt.show()
 
 #%% Wake centre: effect of turbulence intensity
 # fraction of textwidth
-fraction = 1
+fraction = 0.8
 
 # Wake centre methods
 wcm = 'Gaussian'
@@ -1857,8 +1857,8 @@ lines = []
 for iy, fc in enumerate(reversed(fc_TIs)):
     for ip, x_D in enumerate(x_Ds):
         # Extract profile
-        U_pr = fc.velocityProfile('Udef', x_D)
-        V_pr = fc.velocityProfile('V', x_D)
+        U_pr = fc.velocityProfile('Udef', x_D, WT=0)
+        V_pr = fc.velocityProfile('V', x_D, WT=0)
         
         # Calculate wake centres
         centres_u[iy,ip], _ = pu.wakeCentre(wcm, U_pr.y, U_pr)

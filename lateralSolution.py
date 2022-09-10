@@ -5,7 +5,7 @@ Created on Tue Jun 14 11:10:39 2022
 @author: nilsg
 """
 
-def lateralSolution(method, n_t, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, rho=1.225, zh=90.0, D=126.0):
+def lateralSolution(method, n_t, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, near_wake_correction, rho=1.225, zh=90.0, D=126.0):
     '''
     Analytical solution for the cumulative wake of yawed wind turbines. Yields streamwise and lateral velocity fields for a given turbine type, wind farm layout and set of yaw angles.
 
@@ -189,7 +189,7 @@ def lateralSolution(method, n_t, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, 
                     l1 = ((2*s2[ii]**2)/(s[n]**2 + s2[ii]**2)) * np.exp(-((((y_t[n] - y_t[ii])*D)**2)/(2*(s[n]**2 + s2[ii]**2)))) * np.exp(-(((z_t[n] - z_t[ii])**2)/(2*(s[n]**2 + s2[ii]**2))))
                     # Add contribution to sum
                     L1 += l1 * np.real(C2[ii,i])
-                    l2 = ((2*s[ii]**2)/(s2[n]**2 + s[ii]**2)) * np.exp(-((((y_t[n] - y_t[ii])*D)**2)/(2*(s2[n]**2 + s[ii]**2)))) * np.exp(-(((z_t[n] - z_t[ii])**2)/(2*(s2[n]**2 + s[ii]**2))))
+                    l2 = ((2*s[ii]**2)/(s2[n]**2 + s[ii]**2)) * np.exp(-((((y_t[n] - (y_t[ii] + delta_D[ii,i]))*D)**2)/(2*(s2[n]**2 + s[ii]**2)))) * np.exp(-(((z_t[n] - z_t[ii])**2)/(2*(s2[n]**2 + s[ii]**2))))
                     # Add contribution to sum
                     L2 += l2 * np.real(C[ii,i])
             
@@ -204,7 +204,7 @@ def lateralSolution(method, n_t, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, 
             
             #%% Solve for C2n
             # Coupled solution
-            C2[n,i] = (((T[n] * np.sin(yaws[n])) / (np.pi * rho)) + C[n,i] * s[n]**2 * L1) / (s2[n]**2 * (2*U_h - L2))
+            C2[n,i] = (((T[n] * np.sin(yaws[n])) / (np.pi * rho)) + C[n,i] * s[n]**2 * L1) / (s2[n]**2 * (2*U_h - L2 - C[n,i] * (2*s[n]**2/(s2[n]**2 + s[n]**2))))
             
             # Near wake correction
             # if C2[n,i]/U_h > 0.08:
@@ -234,15 +234,17 @@ def lateralSolution(method, n_t, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, V0, I0, 
             # Deflection
             if i < len(x_n)+first-1:
                 # delta_D[n,i+1] = delta_D[n,i] + ((Vc/U_h)*(x[i+1]-x[i]))/D
-                # delta_D[n,i+1] = delta_D[n,i] + ((Vc/Uc)*(x[i+1]-x[i]))/D
-                if (x[i] - x_t[n]*D) > 5*D:
+                if near_wake_correction:
+                    if (x[i] - x_t[n]*D) > 5*D:
+                        delta_D[n,i+1] = delta_D[n,i] + ((Vc/Uc)*(x[i+1]-x[i]))/D
+                else:
                     delta_D[n,i+1] = delta_D[n,i] + ((Vc/Uc)*(x[i+1]-x[i]))/D
             
         #%% Status check
         print('turbine {:d} of {:d} ({:.0f}% complete)'
               .format(n+1, n_t, ((n+1)/n_t)*100))
     
-    return flowdata, P
+    return flowdata, U_d
 
 #%% if __name__ = '__main__':
 if __name__ == '__main__':

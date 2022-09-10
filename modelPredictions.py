@@ -134,7 +134,7 @@ fc_labels = ['2WT/25_0/', '3WT/25_25_0/', '4WT/25_25_25_0/', 'WF/aligned/on/', '
 
 P_total = np.zeros((3, len(flowcases)))
 
-for i_fc, fc in enumerate(flowcases):
+for i_fc, fc in enumerate([flowcases[0]]):
     #%% Shift turbine coordinates to match analytical results
     if fc.wf.n_wt < 10:
         fc.flowdata = fc.flowdata.assign_coords(x=(fc.flowdata.x + 3.5*(fc.wf.n_wt-1)*fc.wf.D))
@@ -222,7 +222,7 @@ for i_fc, fc in enumerate(flowcases):
     cbar.set_label('$U/U_h$')
 
     #%% New analytical solution
-    flowdata, flowdata_def, P, U_h = fc.analytical_solution(method = 'original', removes=[fc.wf.n_wt-1])
+    flowdata, flowdata_def, P, U_h = fc.analytical_solution(method = 'original', near_wake_correction=True, removes=[fc.wf.n_wt-1])
     P_total[1, i_fc] = sum(P)
 
     #%% Hub height velocities
@@ -450,8 +450,8 @@ for i_fc, fc in enumerate(flowcases):
     fraction = 1
     
     # Axes limits
-    xlims = (fc.wf.x_wt[0]-2, fc.wf.x_wt[-1]+20)
-    ylims = (min(fc.wf.y_wt)-3, max(fc.wf.y_wt)+3)
+    xlims = (fc.wf.x_wt[0]-2, fc.wf.x_wt[-1]+8)
+    ylims = (min(fc.wf.y_wt)-2, max(fc.wf.y_wt)+2)
     
     # Contourf limits
     cmin = -0.01

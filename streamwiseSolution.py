@@ -179,7 +179,7 @@ def streamwiseSolution(method, n_t, x_t, y_t, z_t, yaws, x, y, z, U0, U_h, I0, r
         print('turbine {:d} of {:d} ({:.0f}% complete)'
               .format(n+1, n_t, ((n+1)/n_t)*100))
     
-    return flowdata, P
+    return flowdata, U_d
 
 #%% if __name__ = '__main__':
 if __name__ == '__main__':
